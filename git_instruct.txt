@@ -1,0 +1,54 @@
+initial setup:
+
+cd "C:\TEMP\New folder (2)"
+
+echo "# redlight_mod_repo" >> README.md
+git init
+git add README.md
+git commit -m "first commit"
+git branch -M main
+git remote add origin https://github.com/henryjfry/redlight_mod_repo.git
+git push -u origin main
+
+
+
+git add .
+git commit -m "adding stuff/updating repo"
+git push
+
+git add .
+git commit -m "redlight 1.4.3a DIFF => original"
+git push
+
+##ORIGINAL BRANCH
+git checkout main
+
+##NEW DEVELOPMENT BRANCH
+git checkout -b redlight_update
+
+
+##now overwrite updated addon to be able to check merge conflicts
+git add .
+git commit -m "redlight_update 1.4.6"
+git push
+
+
+##PUSH to BOTH branches??
+
+git push -u origin main
+git push -u origin redlight_update
+
+
+NOW in GitHub##
+
+https://github.com/henryjfry/redlight_mod_repo
+
+there will be a merge/pull request.
+Once you commit and resolve any conflicts:
+
+##UPDATE LOCA REPO
+
+git checkout main
+git pull origin main
+
+
