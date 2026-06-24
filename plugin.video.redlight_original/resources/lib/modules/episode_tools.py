@@ -9,7 +9,7 @@ from modules.metadata import episodes_meta, all_episodes_meta
 from modules.watched_status import get_watched_status_episode, get_next_episodes, get_hidden_progress_items, watched_info_episode, get_next
 from modules.utils import adjust_premiered_date, get_datetime, title_key, TaskPool
 from modules import kodi_utils
-# logger = kodi_utils.logger
+import xbmc# logger = kodi_utils.logger
 
 class EpisodeTools:
 	def __init__(self, meta, nextep_settings=None):
@@ -20,7 +20,15 @@ class EpisodeTools:
 	def next_episode_info(self):
 		try:
 			play_type = self.nextep_settings['play_type']
-			season_data = self.meta_get('season_data')
+			#season_data = self.meta_get('season_data')
+			all_eps = all_episodes_meta(self.meta)
+			# build correct structure
+			season_map = {}
+			for ep in all_eps:
+				s = ep['season']
+				season_map.setdefault(s, 0)
+				season_map[s] = max(season_map[s], ep['episode'])
+			season_data = [{'season_number': s, 'episode_count': count} for s, count in season_map.items()]
 			watch_count = self.meta_get('watch_count')
 			current_season, current_episode = int(self.meta_get('season')), int(self.meta_get('episode'))
 			watched_info = watched_info_episode(self.meta_get('tmdb_id'))
