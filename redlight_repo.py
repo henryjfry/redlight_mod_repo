@@ -132,9 +132,12 @@ def update_plugin_references(root_path, search_str, replace_str):
 				print(f"Failed to process {file_path}: {e}")
 
 
-root_path =  r'C:\TEMP\New folder (2)\plugin.video.redlight - Copy'
+#root_path =  r'C:\TEMP\New folder (2)\plugin.video.redlight - Copy'
 
-#clean_python_artifacts(root_path)
+root_path = r'C:\TEMP\New folder (3)'
+
+clean_python_artifacts(root_path)
+exit()
 
 search_str = "plugin.video.redlight"
 replace_str = "plugin.video.redlight_mod"
