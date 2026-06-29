@@ -124,11 +124,61 @@ def safe_browse_defaultt(path):
 		return ''
 	return path
 
-def browse_directory(defaultt=''):
-	return kodi_dialog().browse(0, '', '', defaultt=safe_browse_defaultt(defaultt) or None)
+def browse_start_path(path, force_defaultt=False):
+	'''Native folder path for Kodi browse defaultt (address bar shows the real location).'''
+	if not path or str(path).strip() in ('', 'None', 'empty_setting'):
+		return None
+	native = translate_path(path)
+	if not native or not str(native).strip():
+		return None
+	if force_defaultt:
+		# Import/export defaults use special:// paths; Kodi browse accepts them on all platforms.
+		if str(path).strip().lower().startswith('special://'):
+			return path
+		return native
+	start = safe_browse_defaultt(native)
+	if start == '':
+		return ''
+	return start if start else None
 
-def browse_file(mask='', defaultt=''):
-	return kodi_dialog().browse(1, '', '', mask, defaultt=safe_browse_defaultt(defaultt) or None)
+def _browse_paths_equal(a, b):
+	if not a or not b:
+		return False
+	try:
+		return os.path.normpath(translate_path(a)) == os.path.normpath(translate_path(b))
+	except:
+		return a == b
+
+def browse_directory(defaultt='', heading='Choose folder', use_defaultt=False, confirm_unchanged=False, force_defaultt=False):
+	# Kodi returns defaultt unchanged when the user cancels (same as pressing OK without moving).
+	start = browse_start_path(defaultt, force_defaultt=force_defaultt) if use_defaultt else None
+	result = kodi_dialog().browse(0, heading, '', defaultt=start)
+	if not result or not str(result).strip():
+		return None
+	if start is not None and _browse_paths_equal(result, start):
+		if confirm_unchanged:
+			display = result if len(result) <= 120 else '%s...' % result[:117]
+			if not confirm_dialog(
+				heading=heading,
+				text='Use this folder?[CR][CR][B]%s[/B]' % display,
+				ok_label='Continue',
+				cancel_label='Cancel',
+				default_control=10,
+			):
+				return None
+		else:
+			return None
+	return result
+
+def browse_file(mask='', defaultt='', heading='Choose file', force_defaultt=False):
+	# File browse: cancel with a folder defaultt returns that path, not an empty string.
+	start = browse_start_path(defaultt, force_defaultt=force_defaultt)
+	result = kodi_dialog().browse(1, heading, '', mask, defaultt=start)
+	if not result or not str(result).strip():
+		return None
+	if start is not None and _browse_paths_equal(result, start) and not os.path.isfile(translate_path(result)):
+		return None
+	return result
 
 def addon_info(info):
 	return xbmcaddon.Addon('plugin.video.redlight').getAddonInfo(info)
@@ -193,10 +243,14 @@ def build_url(url_params):
 	return 'plugin://plugin.video.redlight/?%s' % urlencode(url_params)
 
 _FOLDER_URL_SKIP = frozenset(('iconImage', 'random_support', 'random', 'name', 'isFolder'))
+_FOLDER_URL_KEEP_NAME_MODES = frozenset(('navigator.build_shortcut_folder_contents',))
 
 def build_folder_url(url_params):
-	routing = {k: v for k, v in url_params.items() if k not in _FOLDER_URL_SKIP and v not in (None, '')}
-	mode = routing.get('mode', url_params.get('mode', ''))
+	mode = url_params.get('mode', '')
+	skip = _FOLDER_URL_SKIP
+	if mode in _FOLDER_URL_KEEP_NAME_MODES:
+		skip = skip - frozenset(('name',))
+	routing = {k: v for k, v in url_params.items() if k not in skip and v not in (None, '')}
 	if 'category_name' not in routing and url_params.get('name') and mode in ('build_movie_list', 'build_tvshow_list'):
 		routing['category_name'] = url_params['name']
 	return build_url(routing)
@@ -301,8 +355,8 @@ def add_dir(handle, url_params, list_name, icon_image='folder', fanart_image=Non
 	info_tag.setPlot(' ')
 	add_item(handle, url, listitem, isFolder)
 
-def make_listitem():
-	return xbmcgui.ListItem(offscreen=True)
+def make_listitem(offscreen=True):
+	return xbmcgui.ListItem(offscreen=offscreen)
 
 def add_item(handle, url, listitem, isFolder):
 	xbmcplugin.addDirectoryItem(handle, url, listitem, isFolder)
@@ -319,21 +373,38 @@ def set_category(handle, label):
 def end_directory(handle, updateListing=False, cacheToDisc=True):
 	xbmcplugin.endOfDirectory(handle, updateListing=updateListing, cacheToDisc=cacheToDisc)
 
+# Estuary List (50) is for movies/tvshows content only — not plugin browse folders.
+_ESTUARY_MENU_VIEW_MAP = {'50': '55'}
+
+def _resolve_view_id(view_type):
+	try:
+		from caches.settings_cache import get_setting, ensure_settings_properties_loaded
+		ensure_settings_properties_loaded()
+		view_id = get_property('redlight.%s' % view_type) or get_setting('redlight.%s' % view_type) or get_setting(view_type)
+	except: view_id = None
+	if not view_id: return None
+	view_id = str(view_id).strip()
+	if view_type == 'view.main' and 'estuary' in (current_skin() or '').lower():
+		view_id = _ESTUARY_MENU_VIEW_MAP.get(view_id, view_id)
+	return view_id
+
 def set_view_mode(view_type, content='files', is_external=None):
-	if not get_property('redlight.use_viewtypes') == 'true': return
+	if get_property('redlight.use_viewtypes') != 'true': return
 	if is_external == None: is_external = external()
 	if is_external: return
-	view_id = get_property('redlight.%s' % view_type) or None
+	view_id = _resolve_view_id(view_type)
 	if not view_id: return
+	if content in ('', None): content = 'files'
 	try:
-		execute_builtin('Container.SetViewMode(%s)' % view_id)
-		if content in ('', None): return
-		if container_content() == content: return
+		sleep(100)
 		for _ in range(3000):
-			if container_content() == content:
-				execute_builtin('Container.SetViewMode(%s)' % view_id)
-				return
-			sleep(1)
+			if container_content() != content:
+				sleep(1)
+				continue
+			current = get_infolabel('Container.Viewmode.id') or get_infolabel('Container.Viewmode')
+			if current and str(current) == str(view_id): return
+			execute_builtin('Container.SetViewMode(%s)' % view_id)
+			return
 	except: return
 
 def random_integer(start=1, end=1000000):
@@ -374,6 +445,27 @@ def addon_installed(addon_id):
 
 def addon_enabled(addon_id):
 	return get_visibility('System.AddonIsEnabled(%s)' % addon_id)
+
+def service_scrobbler_defer(addon_id, auth_keys=(), scrobble_enable_keys=()):
+	"""Return True when an external service addon should own playback scrobbling."""
+	if not addon_installed(addon_id) or not addon_enabled(addon_id): return False
+	try: inst = addon(addon_id)
+	except: return False
+	if auth_keys:
+		authed = False
+		for key in auth_keys:
+			try:
+				val = str(inst.getSetting(key) or '').strip()
+				if val and val not in ('empty_setting',): authed = True; break
+			except: pass
+		if not authed: return False
+	for key in scrobble_enable_keys:
+		try:
+			val = str(inst.getSetting(key) or '').strip().lower()
+			if val in ('false', '0', 'no', 'off'): return False
+			if val in ('true', '1', 'yes', 'on'): return True
+		except: pass
+	return bool(auth_keys)
 
 def container_content():
 	return get_infolabel('Container.Content')
@@ -485,11 +577,29 @@ def reload_skin():
 def kodi_refresh():
 	execute_builtin('UpdateLibrary(video,special://skin/foo)')
 
+SHUTTING_DOWN_PROP = 'redlight.shutting_down'
+
+def service_shutting_down(monitor=None):
+	if monitor and monitor.abortRequested(): return True
+	return get_property(SHUTTING_DOWN_PROP) == 'true'
+
+def cancel_widget_refresh_alarms():
+	try: execute_builtin('CancelAlarm(redlight_widget_refresh,silent)')
+	except: pass
+	try: execute_builtin('CancelAlarm(redlight_widget_skin,silent)')
+	except: pass
+
+def prepare_service_shutdown():
+	set_property(SHUTTING_DOWN_PROP, 'true')
+	cancel_widget_refresh_alarms()
+
 def schedule_widget_refresh(silent=True, reload_skin=False):
+	if service_shutting_down(): return
 	url = 'plugin://plugin.video.redlight/?mode=refresh_widgets&silent=%s&reload_skin=%s' % ('true' if silent else 'false', 'true' if reload_skin else 'false')
 	execute_builtin('AlarmClock(redlight_widget_refresh,RunPlugin(%s),00:00:02,silent)' % url)
 
 def refresh_widgets(silent=False, reload_skin=False):
+	if service_shutting_down(): return
 	from caches.settings_cache import get_setting
 	from caches.random_widgets_cache import RandomWidgets
 	from caches.lists_cache import lists_cache
@@ -549,6 +659,31 @@ def addon_ui_busy():
 	except: pass
 	return False
 
+def language_invoker_from_addon_xml(addon_name='plugin.video.redlight'):
+	try:
+		from xml.dom.minidom import parse as mdParse
+		addon_xml = translate_path('special://home/addons/%s/addon.xml' % addon_name)
+		if not path_exists(addon_xml): return 'true'
+		root = mdParse(addon_xml)
+		tags = root.getElementsByTagName('reuselanguageinvoker')
+		if not tags: return 'true'
+		node = tags[0].firstChild
+		return (node.data or 'true').strip().lower()
+	except:
+		return 'true'
+
+_ADDON_XML_SYNC_VERSION = 'redlight.addon_xml_sync_version'
+_ADDON_XML_APPLIED = 'redlight.addon_xml_applied'
+
+def addon_xml_sync_needed():
+	return get_property(_ADDON_XML_SYNC_VERSION) != addon_info('version')
+
+def mark_addon_xml_synced():
+	set_property(_ADDON_XML_SYNC_VERSION, addon_info('version'))
+
+def clear_addon_xml_sync_version():
+	clear_property(_ADDON_XML_SYNC_VERSION)
+
 def sync_addon_xml_from_settings(addon_name='plugin.video.redlight'):
 	from xml.dom.minidom import parse as mdParse
 	from caches.settings_cache import get_setting
@@ -564,48 +699,86 @@ def sync_addon_xml_from_settings(addon_name='plugin.video.redlight'):
 		tags = root.getElementsByTagName('reuselanguageinvoker')
 		if tags:
 			node = tags[0].firstChild
-			if node and node.data != invoker_setting:
-				node.data = invoker_setting
+			current = (node.data or '').strip().lower() if node else ''
+			target = str(invoker_setting).strip().lower()
+			if node and current != target:
+				node.data = target
 				changed = True
 				invoker_changed = True
 	if icon_setting is not None:
 		tags = root.getElementsByTagName('icon')
 		if tags:
 			node = tags[0].firstChild
-			if node and node.data != icon_setting:
-				node.data = icon_setting
+			current = (node.data or '').strip() if node else ''
+			target = str(icon_setting).strip()
+			if node and current != target:
+				node.data = target
 				changed = True
 	if changed:
 		new_xml = str(root.toxml()).replace('<?xml version="1.0" ?>', '')
 		with open(addon_xml, 'w') as f: f.write(new_xml)
 	return changed, invoker_changed
 
-def schedule_addon_metadata_reload(invoker_changed=False):
-	from threading import Thread
-	def _run():
-		update_local_addons()
-		if not invoker_changed: return
-		monitor = kodi_monitor()
-		attempts = 0
-		while attempts < 72 and not monitor.abortRequested():
-			if not addon_ui_busy():
-				disable_enable_addon()
-				logger('Red Light', 'Language invoker synced from settings after addon update')
-				return
-			attempts += 1
-			monitor.waitForAbort(5)
-	Thread(target=_run, daemon=True).start()
+def addon_xml_settings_diff(addon_name='plugin.video.redlight'):
+	from xml.dom.minidom import parse as mdParse
+	from caches.settings_cache import get_setting
+	addon_xml = translate_path('special://home/addons/%s/addon.xml' % addon_name)
+	invoker_mismatch = icon_mismatch = False
+	if not path_exists(addon_xml): return invoker_mismatch, icon_mismatch
+	invoker_setting = get_setting('redlight.reuse_language_invoker', None)
+	icon_setting = get_setting('redlight.addon_icon_choice', None)
+	root = mdParse(addon_xml)
+	if invoker_setting is not None:
+		tags = root.getElementsByTagName('reuselanguageinvoker')
+		if tags:
+			node = tags[0].firstChild
+			current = (node.data or '').strip().lower() if node else ''
+			target = str(invoker_setting).strip().lower()
+			invoker_mismatch = current != target
+	if icon_setting is not None:
+		tags = root.getElementsByTagName('icon')
+		if tags:
+			node = tags[0].firstChild
+			current = (node.data or '').strip() if node else ''
+			target = str(icon_setting).strip()
+			icon_mismatch = current != target
+	return invoker_mismatch, icon_mismatch
 
-def restore_addon_xml_from_settings():
+def finish_addon_xml_sync():
+	mark_addon_xml_synced()
+	set_property(_ADDON_XML_APPLIED, 'true')
+
+def restart_addon_for_addon_xml_change(notify=True):
+	if notify:
+		notification('Refreshing addon.xml. Restarting Red Light.', 8000)
+	execute_builtin('ActivateWindow(Home)', True)
+	update_local_addons()
+	disable_enable_addon()
+
+def reuse_language_invoker_check(force=False):
+	"""Fen-style: restore addon.xml from settings; disable/enable when invoker or icon differs."""
 	try:
-		changed, invoker_changed = sync_addon_xml_from_settings()
-		if not changed: return False
-		logger('Red Light', 'Restored addon.xml from settings after update')
-		schedule_addon_metadata_reload(invoker_changed)
+		if not force and get_property(_ADDON_XML_APPLIED) == 'true' and not addon_xml_sync_needed():
+			return False
+		invoker_mismatch, icon_mismatch = addon_xml_settings_diff()
+		if not invoker_mismatch and not icon_mismatch:
+			finish_addon_xml_sync()
+			return False
+		changed, _invoker_changed = sync_addon_xml_from_settings()
+		if not changed:
+			logger('Red Light', 'AddonXMLCheck - addon.xml sync failed')
+			return False
+		logger('Red Light', 'AddonXMLCheck - Change Detected. Restarting Red Light')
+		finish_addon_xml_sync()
+		restart_addon_for_addon_xml_change(notify=not force)
 		return True
 	except Exception as e:
-		logger('restore_addon_xml_from_settings', str(e))
+		logger('reuse_language_invoker_check', str(e))
 		return False
+
+def ensure_addon_xml_from_settings(force=False):
+	"""Settings import / forced restore only — not used from plugin routing."""
+	return reuse_language_invoker_check(force=force)
 
 def update_kodi_addons_db(addon_name='plugin.video.redlight'):
 	import time
@@ -649,6 +822,11 @@ def jsonrpc_set_system_setting(setting_id, value):
 
 def open_settings():
 	try:
+		from caches.settings_cache import refresh_settings_manager_properties
+		refresh_settings_manager_properties()
+	except Exception as e:
+		logger('open_settings', 'bootstrap: %s' % e)
+	try:
 		from apis.aiostreams_api import refresh_settings_properties
 		refresh_settings_properties()
 	except: pass
@@ -667,8 +845,20 @@ def progress_dialog(heading='', icon=None):
 	from windows.base_window import create_window
 	progress_dialog = create_window(('windows.progress', 'Progress'), 'progress.xml', heading=heading, icon=icon or addon_icon())
 	Thread(target=progress_dialog.run).start()
-	sleep(150)
+	for _ in range(40):
+		try:
+			if progress_dialog.getProperty('redlight.progress_ready') == 'true':
+				break
+		except: pass
+		sleep(50)
 	return progress_dialog
+
+def close_progress_dialog(progress):
+	if not progress: return
+	try:
+		progress.is_canceled = True
+		progress.close()
+	except: pass
 
 def select_dialog(function_list, **kwargs):
 	from windows.base_window import open_window

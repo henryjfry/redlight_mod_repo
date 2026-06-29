@@ -526,6 +526,12 @@ def _scrobble_payload(media_type, tmdb_id, percent, season=None, episode=None):
 		data['episode'] = {'season': int(season), 'number': int(episode)}
 	return data
 
+def simkl_official_status(media_type):
+	if kodi_utils.service_scrobbler_defer('script.simkl',
+		auth_keys=('access_token', 'token', 'authorization', 'Authorization', 'simkl_token'),
+		scrobble_enable_keys=('auto_scrobble', 'autoscrobble', 'scrobble_enabled', 'auto_scrobble_enabled')): return False
+	return True
+
 def simkl_scrobble(action, media_type, tmdb_id, percent=0, season=None, episode=None):
 	if not settings.simkl_user_active(): return
 	path = {'start': '/scrobble/start', 'pause': '/scrobble/pause', 'stop': '/scrobble/stop'}.get(action)
@@ -697,9 +703,14 @@ def simkl_sync_activities(params=None, force_update=False):
 def simkl_force_sync(params=None):
 	if not settings.simkl_user_active(): return kodi_utils.notification('Simkl account not authorised', 3000)
 	progress = kodi_utils.progress_dialog('Simkl Sync')
-	progress.update('Syncing with Simkl...', 0)
-	status = simkl_sync_activities(force_update=True)
-	progress.close()
+	status = 'failed'
+	try:
+		progress.update('Syncing with Simkl...', 0)
+		status = simkl_sync_activities(force_update=True)
+	except Exception as e:
+		kodi_utils.logger('Simkl', 'Force sync failed: %s' % e)
+	finally:
+		kodi_utils.close_progress_dialog(progress)
 	if status == 'failed': kodi_utils.notification('Simkl Sync Failed', 3000)
 	else:
 		kodi_utils.notification('Simkl Sync Complete', 3000)

@@ -124,6 +124,12 @@ class Sources():
 		self.sort_function, self.quality_filter = settings.results_sort_order(), self._quality_filter()
 		self.include_unknown_size = get_setting('redlight.results.size_unknown', 'false') == 'true'
 		self.make_search_info()
+		if self.background and self.play_type in ('autoplay_nextep', 'autoscrape_nextep'):
+			self._log_nextep_scrape_started()
+		if self.background and self.autoplay_nextep and self.nextep_settings:
+			if not self.still_watching_check():
+				kodi_utils.notification('Cancel Autoplay', icon=self.meta.get('poster'))
+				return
 		if self.autoscrape: self.autoscrape_nextep_handler()
 		else: return self.get_sources()
 
@@ -392,12 +398,12 @@ class Sources():
 		enable_setting, key = settings.filter_status(file_type), self.filter_keys[file_type]
 		if key == 'HEVC' and enable_setting == 0:
 			hevc_max_quality = self._get_quality_rank(get_setting('redlight.filter.hevc.%s' % ('max_autoplay_quality' if self.autoplay else 'max_quality'), '4K'))
-			results = [i for i in results if not key in i['extraInfo'] or i['quality_rank'] >= hevc_max_quality]
+			results = [i for i in results if not self._extra_info_has_tag(i['extraInfo'], key) or i['quality_rank'] >= hevc_max_quality]
 		if enable_setting == 1:
 			if key in ('D/VISION', 'HDR'):
-				if not settings.filter_status({'D/VISION': 'hdr', 'HDR': 'dv'}[key]) == 0: results = [i for i in results if not key in i['extraInfo']]
-				else: results = [i for i in results if not (key in i['extraInfo'] and not 'HYBRID' in i['extraInfo'])]
-			else: results = [i for i in results if not key in i['extraInfo']]
+				if not settings.filter_status({'D/VISION': 'hdr', 'HDR': 'dv'}[key]) == 0: results = [i for i in results if not self._extra_info_has_tag(i['extraInfo'], key)]
+				else: results = [i for i in results if not (self._extra_info_has_tag(i['extraInfo'], key) and not self._extra_info_has_tag(i['extraInfo'], 'HYBRID'))]
+			else: results = [i for i in results if not self._extra_info_has_tag(i['extraInfo'], key)]
 		return results
 
 	def _normalize_pref_tag(self, tag):
@@ -406,11 +412,27 @@ class Sources():
 		aliases = {'d/vision': 'D/VISION', 'dolby vision': 'D/VISION', 'hdr': 'HDR', 'high dynamic range (hdr)': 'HDR', 'dolby atmos': 'ATMOS', 'atmos': 'ATMOS', 'hevc (x265)': 'HEVC', 'hevc': 'HEVC'}
 		return aliases.get(key, tag)
 
+	def _parse_extra_info_tags(self, extra_info):
+		tags = []
+		if not extra_info: return tags
+		items = extra_info if isinstance(extra_info, list) else [extra_info]
+		for item in items:
+			if not item: continue
+			for part in str(item).split(' | '):
+				part = part.replace('[B]', '').replace('[/B]', '').strip()
+				if part: tags.append(part)
+		return tags
+
 	def _pref_tag_in_extra_info(self, tag, extra_info):
 		if not tag or not extra_info: return False
-		if isinstance(extra_info, list): extra_info = ' | '.join(extra_info)
 		normalized = self._normalize_pref_tag(tag)
-		return normalized in extra_info or tag in extra_info
+		for part in self._parse_extra_info_tags(extra_info):
+			part_norm = self._normalize_pref_tag(part)
+			if part_norm == normalized or part == tag or part == normalized: return True
+		return False
+
+	def _extra_info_has_tag(self, extra_info, tag):
+		return self._pref_tag_in_extra_info(tag, extra_info)
 
 	def _normalized_title_blob(self, item):
 		parts = [item.get('name'), item.get('display_name')]
@@ -445,7 +467,10 @@ class Sources():
 		blob = self._normalized_title_blob(item)
 		if normalized == 'D/VISION' and any(x in blob for x in ('dolby vision', 'dolbyvision', ' dovi ', ' dv ', 'dovi', 'profile 8', 'profile8')): return True
 		if normalized == 'ATMOS' and ('atmos' in blob or ('ddp' in blob and 'atmos' in blob)): return True
-		if normalized == 'HDR' and any(x in blob for x in ('hdr10', ' hdr ', 'hdr10+', 'hdr10p')): return True
+		if normalized == 'HDR':
+			if any(x in blob.split() for x in ('hdrip', 'hd.rip')): return False
+			if any(x in blob for x in ('hdr10', 'hdr10+', 'hdr10p')): return True
+			return ' hdr ' in f' {blob} '
 		return False
 
 	def sort_preferred_filters(self, results):
@@ -1716,6 +1741,50 @@ class Sources():
 			return self._no_results()
 		return self._show_playback_failed_dialog()
 
+	def _log_nextep_scrape_started(self):
+		try:
+			kodi_utils.logger('Red Light', 'Next episode background scrape started: %s S%02dE%02d (%s)' % (
+				self.meta.get('title'), self.meta.get('season'), self.meta.get('episode'), self.play_type))
+		except: pass
+
+	def _playback_remaining_seconds(self, player, allow_stopped=False):
+		try:
+			if not allow_stopped and not player.isPlayingVideo(): return None
+			return round(float(player.getTotalTime()) - float(player.getTime()))
+		except:
+			if not allow_stopped: return None
+			try:
+				prop = kodi_utils.get_property('redlight.nextep_remaining')
+				if prop: return int(prop)
+			except: pass
+			return None
+
+	def _autoscrape_stop_notify_remaining(self, window_time):
+		return max(int(window_time), settings.NEXTEP_STOP_NOTIFY_REMAINING_SEC)
+
+	def _notify_autoscrape_ready(self, remaining, window_time):
+		if getattr(self, '_autoscrape_ready_notified', False): return
+		self._autoscrape_ready_notified = True
+		kodi_utils.logger('Red Light', 'Autoscrape next episode ready: %s S%02dE%02d remaining=%ss alert_window=%ss' % (
+			self.meta.get('title'), self.meta.get('season'), self.meta.get('episode'), remaining, window_time))
+		kodi_utils.notification('[B]Next Episode Ready:[/B] %s S%02dE%02d' \
+				% (self.meta.get('title'), self.meta.get('season'), self.meta.get('episode')), 6500, self.meta.get('poster'))
+
+	def _wait_autoscrape_pop_window(self, player, window_time):
+		tight = int(window_time)
+		last_remaining = self._playback_remaining_seconds(player)
+		while player.isPlayingVideo():
+			last_remaining = self._playback_remaining_seconds(player)
+			if last_remaining is None: break
+			if last_remaining <= tight:
+				return last_remaining, True
+			kodi_utils.sleep(500)
+		return last_remaining, False
+
+	def _should_autoscrape_stop_notify(self, remaining, window_time):
+		if remaining is None: return False
+		return remaining <= self._autoscrape_stop_notify_remaining(window_time)
+
 	def still_watching_check(self):
 		watching_check = self.nextep_settings.get('watching_check', 0)
 		if watching_check == 0: return True
@@ -1745,9 +1814,6 @@ class Sources():
 
 	def autoplay_nextep_handler(self):
 		if not self.nextep_settings: return False
-		if not self.still_watching_check():
-			kodi_utils.notification('Cancel Autoplay', icon=self.meta.get('poster'))
-			return False
 		use_window = self.nextep_settings['use_window']
 		window_time = self.nextep_settings['window_time']
 		default_action = self.nextep_settings['default_action']
@@ -1796,16 +1862,35 @@ class Sources():
 			if not self._make_still_watching_dialog('Autoscrape Next Episode of [B]%s[/B]?', heading='Autoscrape Next Episode?', right_align=True):
 				return
 		player = kodi_utils.kodi_player()
-		if player.isPlayingVideo():
-			results = self.get_sources()
-			if not results:
-				return
+		if not player.isPlayingVideo():
+			return
+		results = self.get_sources()
+		if not results:
+			kodi_utils.logger('Red Light', 'Autoscrape next episode: no results for %s S%02dE%02d' % (
+				self.meta.get('title'), self.meta.get('season'), self.meta.get('episode')))
+			return
+		window_time = self.nextep_settings.get('window_time', 0) if self.nextep_settings else 0
+		self._autoscrape_ready_notified = False
+		remaining = self._playback_remaining_seconds(player, allow_stopped=True)
+		if not player.isPlayingVideo():
+			if self._should_autoscrape_stop_notify(remaining, window_time):
+				self._notify_autoscrape_ready(remaining, window_time)
 			else:
-				kodi_utils.notification('[B]Next Episode Ready:[/B] %s S%02dE%02d' \
-						% (self.meta.get('title'), self.meta.get('season'), self.meta.get('episode')), 6500, self.meta.get('poster'))
-				while player.isPlayingVideo(): kodi_utils.sleep(100)
-			self.display_results(results)
-		else: return
+				kodi_utils.logger('Red Light', 'Autoscrape next episode ready (stopped during scrape): %s S%02dE%02d remaining=%ss alert_window=%ss' % (
+					self.meta.get('title'), self.meta.get('season'), self.meta.get('episode'), remaining, window_time))
+			return self.display_results(results)
+		if remaining is not None and remaining <= int(window_time):
+			self._notify_autoscrape_ready(remaining, window_time)
+		else:
+			remaining, should_notify = self._wait_autoscrape_pop_window(player, window_time)
+			if should_notify:
+				self._notify_autoscrape_ready(remaining, window_time)
+		while player.isPlayingVideo(): kodi_utils.sleep(100)
+		if not self._autoscrape_ready_notified:
+			remaining = self._playback_remaining_seconds(player, allow_stopped=True)
+			if self._should_autoscrape_stop_notify(remaining, window_time):
+				self._notify_autoscrape_ready(remaining, window_time)
+		self.display_results(results)
 
 	def debrid_importer(self, debrid_provider):
 		return manual_function_import(*self.debrids[debrid_provider])

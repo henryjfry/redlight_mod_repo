@@ -13,7 +13,9 @@ _MAX_PROPERTY_LEN = 8192
 _SETTINGS_PROPERTIES_LOADED = 'redlight.settings_properties_loaded'
 _DEFERRED_SETUP_DONE = 'redlight.deferred_service_setup_done'
 _SETTINGS_DB_MIGRATED = 'redlight.settings_db_migrated'
+_SETTINGS_WIDGETS_MIGRATED = 'redlight.settings_widgets_migrated'
 _SETTINGS_DB_SYNCED = 'redlight.settings_db_synced'
+_SETTINGS_SYNC_FINGERPRINT = 'redlight.settings_sync_fingerprint'
 _WIDGET_REFRESH_SCHEDULED = 'redlight.widgets_refresh_scheduled'
 _bootstrap_lock = Lock()
 _DEFAULTS_LIST = None
@@ -21,6 +23,53 @@ _DEFAULTS_MAP = None
 
 def _properties_loaded():
 	return kodi_utils.get_property(_SETTINGS_PROPERTIES_LOADED) == 'true'
+
+def _settings_schema_token():
+	return '%s:%s' % (kodi_utils.addon_info('version'), len(default_settings()))
+
+def compute_settings_sync_fingerprint():
+	return _settings_schema_token()
+
+def mark_settings_sync_complete():
+	kodi_utils.set_property(_SETTINGS_SYNC_FINGERPRINT, compute_settings_sync_fingerprint())
+
+def settings_sync_needed():
+	if kodi_utils.get_property(_SETTINGS_DB_SYNCED) != 'true':
+		return True
+	stored = kodi_utils.get_property(_SETTINGS_SYNC_FINGERPRINT) or ''
+	return stored != compute_settings_sync_fingerprint()
+
+def clear_settings_boot_state(clear_deferred=True):
+	kodi_utils.clear_property(_SETTINGS_SYNC_FINGERPRINT)
+	kodi_utils.clear_property(_SETTINGS_DB_SYNCED)
+	kodi_utils.clear_property(_SETTINGS_PROPERTIES_LOADED)
+	kodi_utils.clear_property(_SETTINGS_DB_MIGRATED)
+	kodi_utils.clear_property(_SETTINGS_WIDGETS_MIGRATED)
+	if clear_deferred:
+		kodi_utils.clear_property(_DEFERRED_SETUP_DONE)
+
+def bootstrap_settings_needed():
+	if not _properties_loaded():
+		return True
+	if kodi_utils.get_property(_SETTINGS_DB_MIGRATED) == 'true':
+		return True
+	if kodi_utils.get_property(_DEFERRED_SETUP_DONE) != 'true':
+		return True
+	return False
+
+def widgets_refresh_after_migration_needed():
+	return kodi_utils.get_property(_SETTINGS_WIDGETS_MIGRATED) == 'true'
+
+def service_bootstrap_needed():
+	return bootstrap_settings_needed() or widgets_refresh_after_migration_needed()
+
+def _new_settings_affect_widgets(insert_list):
+	for item in insert_list:
+		setting_id = item[0]
+		if setting_id.startswith('migration.'):
+			continue
+		return True
+	return False
 
 _CREDENTIAL_STRING_SETTINGS = frozenset(('tmdb_api', 'trakt.client', 'trakt.secret', 'tmdb.lists_read_token', 'omdb_api'))
 
@@ -84,6 +133,16 @@ def sanitize_setting_value(setting_id, value, setting_info=None, validate_paths=
 		if value == '3':
 			from modules.settings import mdblist_user_active
 			if mdblist_user_active(): return value
+		return '0'
+	if setting_id == 'playback.subs_source':
+		from modules.settings import subtitles_source_options
+		value = str(value)
+		opts = subtitles_source_options()
+		if value in opts: return value
+		if value == '2':
+			return '1' if '1' in opts else '0'
+		if value == '1':
+			return '2' if '2' in opts else '0'
 		return '0'
 	if setting_id in _CREDENTIAL_STRING_SETTINGS:
 		if value in (None, 'empty_setting', ''): return default if value is None else value
@@ -173,6 +232,10 @@ class SettingsCache:
 				from modules.settings import watched_provider_options
 				opts = watched_provider_options()
 				name_setting_value = opts.get(str(setting_value)) or setting_info['settings_options'].get(str(setting_value), opts['0'])
+			elif setting_id == 'playback.subs_source':
+				from modules.settings import subtitles_source_options
+				opts = subtitles_source_options()
+				name_setting_value = opts.get(str(setting_value), opts['0'])
 			else:
 				name_setting_value = setting_info['settings_options'][setting_value]
 			if setting_id == 'aiostreams.instance':
@@ -259,6 +322,18 @@ def _apply_settings_properties_from_db():
 				static_opts = info.get('settings_options', {})
 				settings_cache.set_memory_cache('watched_indicators_name', opts.get(sanitized) or static_opts.get(sanitized, opts['0']))
 			except: pass
+		if setting_id == 'playback.subs_source':
+			try:
+				from modules.settings import subtitles_source_options
+				opts = subtitles_source_options()
+				settings_cache.set_memory_cache('playback.subs_source_name', opts.get(sanitized, opts['0']))
+			except: pass
+		if setting_id in ('stinger_alert.alert_timing', 'autoplay_alert_timing', 'autoscrape_alert_timing'):
+			try:
+				info = defaults_map.get(setting_id) or {}
+				opts = info.get('settings_options', {})
+				settings_cache.set_memory_cache('%s_name' % setting_id, opts.get(sanitized, opts.get('1', '')))
+			except: pass
 	try:
 		from apis.aiostreams_api import refresh_settings_properties
 		refresh_settings_properties()
@@ -284,18 +359,33 @@ def ensure_settings_properties_loaded():
 			return True
 		return bootstrap_settings_properties()
 
+def refresh_settings_manager_properties():
+	"""Republish settings.db to Home props before Settings Manager opens (boolean toggles need this)."""
+	settings_cache.clear_db_cache()
+	_apply_settings_properties_from_db()
+	try:
+		from modules.settings import refresh_playback_subs_source
+		refresh_playback_subs_source()
+	except: pass
+
 def bootstrap_settings_properties(force=False):
-	if not force and _properties_loaded(): return False
+	db_migrated = kodi_utils.get_property(_SETTINGS_DB_MIGRATED) == 'true'
+	if not force and _properties_loaded() and not db_migrated:
+		return False
 	with _bootstrap_lock:
-		if not force and _properties_loaded(): return False
+		db_migrated = kodi_utils.get_property(_SETTINGS_DB_MIGRATED) == 'true'
+		if not force and _properties_loaded() and not db_migrated:
+			return False
 		if force:
 			kodi_utils.clear_property(_SETTINGS_PROPERTIES_LOADED)
 			kodi_utils.clear_property(_SETTINGS_DB_SYNCED)
 		if force or kodi_utils.get_property(_SETTINGS_DB_SYNCED) != 'true':
-			sync_settings({'silent': 'true', 'load_properties': False})
+			sync_settings({'silent': 'true', 'load_properties': False, 'force': 'true'})
 		else:
 			kodi_utils.clear_property(_SETTINGS_PROPERTIES_LOADED)
 		_apply_settings_properties_from_db()
+		if db_migrated:
+			kodi_utils.clear_property(_SETTINGS_DB_MIGRATED)
 		return True
 
 def schedule_widget_refresh_once(reload_skin=False):
@@ -305,9 +395,9 @@ def schedule_widget_refresh_once(reload_skin=False):
 	except: pass
 
 def refresh_widgets_after_db_migration():
-	if kodi_utils.get_property(_SETTINGS_DB_MIGRATED) != 'true': return
-	kodi_utils.clear_property(_SETTINGS_DB_MIGRATED)
-	schedule_widget_refresh_once(reload_skin=True)
+	if kodi_utils.get_property(_SETTINGS_WIDGETS_MIGRATED) != 'true': return
+	kodi_utils.clear_property(_SETTINGS_WIDGETS_MIGRATED)
+	schedule_widget_refresh_once(reload_skin=not kodi_utils.is_android())
 
 def run_deferred_setup_if_needed():
 	run_deferred_setup_background_if_needed()
@@ -334,15 +424,62 @@ def is_directory_listing_mode(mode):
 	if mode.startswith('navigator.'): return True
 	return mode in _DIRECTORY_LISTING_MODES
 
+def should_block_bootstrap_on_entry(mode):
+	"""Only block plugin entry when opening settings UI; listings read settings.db directly."""
+	if mode in ('open_settings', 'sync_settings'):
+		return True
+	if mode and mode.startswith('settings_manager.'):
+		return True
+	return False
+
 def load_settings_properties(force=False):
 	bootstrap_settings_properties(force=force)
 	refresh_widgets_after_db_migration()
 	run_deferred_setup_if_needed()
 
+def reload_after_settings_restore(imported_db_keys=()):
+	"""Reload caches after a settings backup import without stopping the addon service."""
+	clear_settings_boot_state(clear_deferred=True)
+	kodi_utils.clear_property(_WIDGET_REFRESH_SCHEDULED)
+	settings_cache.clear_db_cache()
+	imported = set(imported_db_keys or ())
+	if not imported or 'navigator_db' in imported:
+		try:
+			from caches.navigator_cache import navigator_cache
+			for list_name in navigator_cache.main_menus:
+				navigator_cache.delete_memory_cache(list_name, 'default')
+				navigator_cache.delete_memory_cache(list_name, 'edited')
+		except: pass
+	try:
+		sync_settings({'silent': 'true', 'load_properties': False})
+	except Exception as e:
+		kodi_utils.logger('reload_after_settings_restore', 'sync: %s' % e)
+	try:
+		kodi_utils.ensure_addon_xml_from_settings(force=True)
+	except Exception as e:
+		kodi_utils.logger('reload_after_settings_restore', 'addon_xml: %s' % e)
+	from threading import Thread
+	def _bootstrap():
+		try:
+			bootstrap_settings_properties(force=True)
+			run_deferred_setup_background_if_needed()
+			schedule_widget_refresh_once(reload_skin=False)
+		except Exception as e:
+			kodi_utils.logger('reload_after_settings_restore', 'bootstrap: %s' % e)
+	Thread(target=_bootstrap, daemon=True).start()
+
 def sync_settings(params={}):
 	silent = params.get('silent', 'true') == 'true'
-	load_properties = params.get('load_properties', True)
+	force = params.get('force', False) == 'true'
+	if 'load_properties' in params:
+		load_properties = params.get('load_properties', True) == 'true'
+	else:
+		# AM Lite and boot service sync update settings.db only; full property reload is for Remake Settings Cache.
+		load_properties = not silent
+	if not force and not load_properties and not settings_sync_needed():
+		return 'skipped'
 	migrated = False
+	widgets_migrated = False
 	insert_list = []
 	insert_list_append = insert_list.append
 	currentsettings = settings_cache.get_all()
@@ -373,6 +510,20 @@ def sync_settings(params={}):
 		settings_cache.remove_setting(old_id)
 		currentsettings.pop(old_id, None)
 		migrated = True
+	_alert_timing_migrations = (
+		('stinger_alert.use_chapters', 'stinger_alert.alert_timing'),
+		('autoplay_use_chapters', 'autoplay_alert_timing'),
+		('autoscrape_use_chapters', 'autoscrape_alert_timing'),
+	)
+	for old_id, new_id in _alert_timing_migrations:
+		if old_id not in currentsettings: continue
+		new_val = '1' if str(currentsettings[old_id]).lower() == 'true' else '0'
+		settings_cache.write_db(new_id, new_val, defaults_map.get(new_id))
+		currentsettings[new_id] = new_val
+		if load_properties: settings_cache.set_memory_cache(new_id, new_val)
+		settings_cache.remove_setting(old_id)
+		currentsettings.pop(old_id, None)
+		migrated = True
 	if had_existing_settings and currentsettings.get('migration.cache_check_pm_oc_tb_v129e') != 'true':
 		for cache_key in ('pm.cache_check', 'oc.cache_check', 'tb.cache_check'):
 			if currentsettings.get(cache_key) == 'true': continue
@@ -384,12 +535,6 @@ def sync_settings(params={}):
 		currentsettings['migration.cache_check_pm_oc_tb_v129e'] = 'true'
 		if load_properties: settings_cache.set_memory_cache('migration.cache_check_pm_oc_tb_v129e', 'true')
 	if currentsettings:
-		if currentsettings.get('update.username', '').replace('-', '').lower() == 'theredwizard' \
-				and currentsettings.get('update.username') != 'The-Red-Wizard':
-			settings_cache.write_db('update.username', 'The-Red-Wizard', defaults_map.get('update.username'))
-			currentsettings['update.username'] = 'The-Red-Wizard'
-			migrated = True
-			if load_properties: settings_cache.set_memory_cache('update.username', 'The-Red-Wizard')
 		from modules.settings import migrate_simkl_context_menu_for_upgrade, migrate_mdblist_context_menu_for_upgrade, migrate_cm_manager_order_for_upgrade
 		if migrate_simkl_context_menu_for_upgrade(had_existing_settings): migrated = True
 		if migrate_mdblist_context_menu_for_upgrade(had_existing_settings): migrated = True
@@ -429,16 +574,26 @@ def sync_settings(params={}):
 	if insert_list:
 		settings_cache.set_many(insert_list, load_properties=load_properties)
 		migrated = True
+		if _new_settings_affect_widgets(insert_list):
+			widgets_migrated = True
 	if migrated and had_existing_settings:
 		kodi_utils.set_property(_SETTINGS_DB_MIGRATED, 'true')
+	if widgets_migrated and had_existing_settings:
+		kodi_utils.set_property(_SETTINGS_WIDGETS_MIGRATED, 'true')
 	if load_properties:
 		settings_cache.clean_database()
 		bootstrap_settings_properties(force=True)
 		run_deferred_setup_if_needed()
+		kodi_utils.set_property(_SETTINGS_DB_SYNCED, 'true')
+		mark_settings_sync_complete()
 	else:
 		kodi_utils.set_property(_SETTINGS_DB_SYNCED, 'true')
-		kodi_utils.clear_property(_SETTINGS_PROPERTIES_LOADED)
+		mark_settings_sync_complete()
+		settings_cache.clear_db_cache()
+		if _properties_loaded():
+			_apply_settings_properties_from_db()
 	if not silent: kodi_utils.notification('Settings Cache Remade')
+	return 'synced'
 
 def set_default(setting_ids):
 	if not isinstance(setting_ids, list): setting_ids = [setting_ids]
@@ -464,7 +619,14 @@ def set_string(params):
 	if setting_id == 'tmdb_api' and new_value and looks_like_tmdb_v4_jwt(new_value):
 		kodi_utils.ok_dialog(heading='Wrong key type', text='This is a TMDb v4 Read Access Token (JWT), not the v3 API Key.[CR]Use TMDb Lists → Read Access Token for v4 tokens.')
 		return set_string(params)
+	if setting_id == 'playback.submaker_manifest' and new_value:
+		new_value = new_value.strip()
 	set_setting(setting_id, new_value or 'empty_setting')
+	if setting_id in ('playback.submaker_manifest', 'playback.opensubs_username', 'playback.opensubs_password'):
+		try:
+			from modules.settings import refresh_playback_subs_source
+			refresh_playback_subs_source()
+		except: pass
 
 def set_numeric(params):
 	setting_id = params['setting_id']
@@ -491,22 +653,35 @@ def set_path(params):
 	browse_mode = int(default_setting_values(setting_id)['browse_mode'])
 	current = get_setting('redlight.%s' % setting_id)
 	if browse_mode == 0:
-		new_value = kodi_utils.browse_directory(current)
+		force_defaultt = setting_id == 'import_export_directory'
+		new_value = kodi_utils.browse_directory(current, heading='Choose folder', use_defaultt=True, force_defaultt=force_defaultt)
 	else:
-		new_value = kodi_utils.kodi_dialog().browse(browse_mode, '', '', defaultt=current)
+		result = kodi_utils.kodi_dialog().browse(browse_mode, 'Choose file', '', defaultt=current or None)
+		new_value = result if result and str(result).strip() else None
 	if not new_value:
 		return
 	set_setting(setting_id, new_value)
+	if setting_id == 'import_export_directory':
+		try:
+			from modules import settings
+			settings.ensure_import_export_directory()
+		except:
+			pass
 
 def set_from_list(params):
 	setting_id = params['setting_id']
 	if setting_id == 'watched_indicators':
 		from modules.settings import watched_provider_options
 		settings_options = watched_provider_options().items()
+	elif setting_id == 'playback.subs_source':
+		from modules.settings import subtitles_source_options
+		settings_options = subtitles_source_options().items()
 	else:
 		settings_options = default_setting_values(setting_id)['settings_options'].items()
 	settings_list = [(v, k) for k, v in settings_options]
 	if setting_id == 'watched_indicators':
+		settings_list.sort(key=lambda item: item[0].lower())
+	elif setting_id in ('stinger_alert.alert_timing', 'autoplay_alert_timing', 'autoscrape_alert_timing'):
 		settings_list.sort(key=lambda item: item[0].lower())
 	new_value = kodi_utils.select_dialog(settings_list, **{'items': json.dumps([{'line1': item[0]} for item in settings_list]), 'narrow_window': 'true'})
 	if not new_value: return
@@ -569,11 +744,6 @@ def default_settings():
 #==================== Window Theme
 {'setting_id': 'window_theme', 'setting_type': 'string', 'setting_default': 'CC1F2020'},
 {'setting_id': 'window_theme_opacity', 'setting_type': 'string', 'setting_default': 'CC'},
-#==================== Manage Updates
-{'setting_id': 'update.action', 'setting_type': 'action', 'setting_default': '0', 'settings_options': {'0': 'Prompt', '1': 'Automatic', '2': 'Notification', '3': 'Off'}},
-{'setting_id': 'update.delay', 'setting_type': 'action', 'setting_default': '10', 'min_value': '10', 'max_value': '300'},
-{'setting_id': 'update.username', 'setting_type': 'string', 'setting_default': 'The-Red-Wizard'},
-{'setting_id': 'update.location', 'setting_type': 'string', 'setting_default': 'TheRedWizard.github.io'},
 #==================== Watched Indicators
 {'setting_id': 'watched_indicators', 'setting_type': 'action', 'setting_default': '0', 'settings_options': {'3': 'MDBList', '0': 'Red Light', '2': 'Simkl', '1': 'Trakt'}},
 #======+============= MDBList Cache
@@ -930,7 +1100,7 @@ def default_settings():
 {'setting_id': 'auto_resume_movie', 'setting_type': 'action', 'setting_default': '0', 'settings_options': {'0': 'Never', '1': 'Always', '2': 'Autoplay Only'}},
 {'setting_id': 'stinger_alert.show', 'setting_type': 'boolean', 'setting_default': 'false'},
 {'setting_id': 'stinger_alert.window_percentage', 'setting_type': 'action', 'setting_default': '90', 'min_value': '1', 'max_value': '99'},
-{'setting_id': 'stinger_alert.use_chapters', 'setting_type': 'boolean', 'setting_default': 'true'},
+{'setting_id': 'stinger_alert.alert_timing', 'setting_type': 'action', 'setting_default': '1', 'settings_options': {'0': 'Playback Percentage', '1': 'Chapter Info', '2': 'Subtitles Info'}},
 #==================== Playback Episodes
 {'setting_id': 'auto_play_episode', 'setting_type': 'boolean', 'setting_default': 'false'},
 {'setting_id': 'results_quality_episode', 'setting_type': 'string', 'setting_default': 'SD, 720p, 1080p, 4K'},
@@ -939,11 +1109,11 @@ def default_settings():
 {'setting_id': 'autoplay_alert_method', 'setting_type': 'action', 'setting_default': '0', 'settings_options': {'0': 'Window', '1': 'Notification'}},
 {'setting_id': 'autoplay_default_action', 'setting_type': 'action', 'setting_default': '0', 'settings_options': {'0': 'Play', '1': 'Cancel', '2': 'Pause & Wait'}},
 {'setting_id': 'autoplay_next_window_percentage', 'setting_type': 'action', 'setting_default': '95', 'min_value': '75', 'max_value': '99'},
-{'setting_id': 'autoplay_use_chapters', 'setting_type': 'boolean', 'setting_default': 'true'},
+{'setting_id': 'autoplay_alert_timing', 'setting_type': 'action', 'setting_default': '1', 'settings_options': {'0': 'Playback Percentage', '1': 'Chapter Info', '2': 'Subtitles Info'}},
 {'setting_id': 'autoplay_watching_check', 'setting_type': 'action', 'setting_default': '3', 'min_value': '0', 'max_value': '5'},
 {'setting_id': 'autoscrape_next_episode', 'setting_type': 'boolean', 'setting_default': 'false'},
 {'setting_id': 'autoscrape_next_window_percentage', 'setting_type': 'action', 'setting_default': '95', 'min_value': '75', 'max_value': '99'},
-{'setting_id': 'autoscrape_use_chapters', 'setting_type': 'boolean', 'setting_default': 'true'},
+{'setting_id': 'autoscrape_alert_timing', 'setting_type': 'action', 'setting_default': '1', 'settings_options': {'0': 'Playback Percentage', '1': 'Chapter Info', '2': 'Subtitles Info'}},
 {'setting_id': 'autoscrape_confirm', 'setting_type': 'boolean', 'setting_default': 'false'},
 {'setting_id': 'auto_resume_episode', 'setting_type': 'action', 'setting_default': '0', 'settings_options': {'0': 'Never', '1': 'Always', '2': 'Autoplay Only'}},
 #==================== Playback Utilities
@@ -954,14 +1124,17 @@ def default_settings():
 {'setting_id': 'playback.volumecheck_enabled', 'setting_type': 'boolean', 'setting_default': 'false'},
 {'setting_id': 'playback.volumecheck_percent', 'setting_type': 'action', 'setting_default': '50', 'min_value': '1', 'max_value': '100'},
 {'setting_id': 'playback.auto_enable_subs', 'setting_type': 'boolean', 'setting_default': 'false'},
-{'setting_id': 'playback.subs_source', 'setting_type': 'action', 'setting_default': '0', 'settings_options': {'0': 'Local Subtitles', '1': 'SubMaker'}},
+{'setting_id': 'playback.opensubs_api_key', 'setting_type': 'string', 'setting_default': 'empty_setting'},
+{'setting_id': 'playback.opensubs_username', 'setting_type': 'string', 'setting_default': 'empty_setting'},
+{'setting_id': 'playback.opensubs_password', 'setting_type': 'string', 'setting_default': 'empty_setting'},
+{'setting_id': 'playback.subs_source', 'setting_type': 'action', 'setting_default': '0', 'settings_options': {'0': 'Local Subtitles', '1': 'SubMaker', '2': 'OpenSubtitles'}},
 {'setting_id': 'playback.submaker_manifest', 'setting_type': 'string', 'setting_default': 'empty_setting'},
 {'setting_id': 'playback.submaker_language', 'setting_type': 'action', 'setting_default': '0', 'settings_options': {'0': 'English', '1': 'Arabic', '2': 'Bengali',
 '3': 'Bulgarian', '4': 'Chinese', '5': 'Croatian', '6': 'Czech', '7': 'Danish', '8': 'Dutch', '9': 'Finnish', '10': 'French', '11': 'German',
 '12': 'Greek', '13': 'Hebrew', '14': 'Hindi', '15': 'Hungarian', '16': 'Icelandic', '17': 'Indonesian', '18': 'Italian', '19': 'Japanese',
 '20': 'Korean', '21': 'Malay', '22': 'Norwegian', '23': 'Persian', '24': 'Polish', '25': 'Portuguese', '26': 'Portuguese (Brazil)', '27': 'Punjabi',
 '28': 'Romanian', '29': 'Russian', '30': 'Serbian', '31': 'Slovenian', '32': 'Spanish', '33': 'Swedish', '34': 'Tagalog', '35': 'Tamil', '36': 'Telugu',
-'37': 'Thai', '38': 'Turkish', '39': 'Ukrainian', '40': 'Urdu', '41': 'Vietnamese'}},
+'37': 'Thai', '38': 'Turkish', '39': 'Ukrainian', '40': 'Urdu', '41': 'Vietnamese', '42': 'Forced Only (Local Subs)'}},
 {'setting_id': 'playback.submaker_prefer_local', 'setting_type': 'boolean', 'setting_default': 'true'},
 
 
@@ -987,6 +1160,7 @@ def default_settings():
 {'setting_id': 'trakt.expires', 'setting_type': 'string', 'setting_default': '0'},
 {'setting_id': 'trakt.refresh', 'setting_type': 'string', 'setting_default': '0'},
 {'setting_id': 'trakt.token', 'setting_type': 'string', 'setting_default': '0'},
+{'setting_id': 'playback.opensubs_token', 'setting_type': 'string', 'setting_default': '0'},
 {'setting_id': 'tmdblist.list_sort', 'setting_type': 'string', 'setting_default': '0'},
 {'setting_id': 'tmdblist.list_sort_name', 'setting_type': 'string', 'setting_default': 'Title'},
 {'setting_id': 'personal_list.list_sort', 'setting_type': 'string', 'setting_default': '0'},
@@ -1030,6 +1204,5 @@ def default_settings():
 {'setting_id': 'extras.movie.button15', 'setting_type': 'string', 'setting_default': 'show_genres'},
 {'setting_id': 'extras.movie.button16', 'setting_type': 'string', 'setting_default': 'show_director'},
 {'setting_id': 'extras.movie.button17', 'setting_type': 'string', 'setting_default': 'show_options'},
-{'setting_id': 'updatechecks.refresh_addon_keys', 'setting_type': 'string', 'setting_default': 'false'}
 	]
 	return _DEFAULTS_LIST

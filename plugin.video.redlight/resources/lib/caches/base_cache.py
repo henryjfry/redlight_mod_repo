@@ -99,6 +99,29 @@ def connect_database(database_name):
 	dbcon.execute('PRAGMA journal_mode = OFF')
 	return dbcon
 
+def ensure_database_tables(database_name):
+	"""Create missing tables without deleting existing data (safe before service has run)."""
+	db_dir = path.join(kodi_utils.addon_profile(), 'databases')
+	if not kodi_utils.path_exists(db_dir):
+		kodi_utils.make_directory(db_dir)
+	dbcon = connect_database(database_name)
+	try:
+		for command in table_creators()[database_name]:
+			dbcon.execute(command)
+	finally:
+		try: dbcon.close()
+		except: pass
+
+def ensure_listing_databases_ready():
+	"""Plugin entry can run before the service; guarantee core DB tables and settings rows exist."""
+	ensure_database_tables('settings_db')
+	ensure_database_tables('navigator_db')
+	if kodi_utils.get_property('redlight.settings_db_synced') != 'true':
+		try:
+			from caches.settings_cache import sync_settings
+			sync_settings({'silent': 'true', 'load_properties': False})
+		except: pass
+
 def get_timestamp(offset=0):
 	# Offset is in HOURS multiply by 3600 to get seconds
 	return int(time.time()) + (offset*3600)
@@ -258,7 +281,7 @@ def clear_cache(cache_type, silent=False):
 		if not _confirm(): return
 		from caches.main_cache import main_cache
 		success = main_cache.delete_all()
-	if not silent and success: kodi_utils.notification('Success')
+	if not silent and success and cache_type not in ('trakt', 'simkl', 'mdblist'): kodi_utils.notification('Success')
 	return success
 
 def clear_all_cache():

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from caches.settings_cache import get_setting, set_setting, default_setting_values, _EXTRAS_LIST_DEFAULT
-from modules.kodi_utils import translate_path, get_property, addon_profile
+from modules.kodi_utils import translate_path, get_property, addon_profile, make_directory
 from modules.kodi_utils import logger
 
 def tmdb_api_key():
@@ -92,11 +92,23 @@ def download_directory(media_type):
 								None: 'redlight.premium_download_directory', 'None': False}
 	return translate_path(get_setting(download_directories_dict[media_type]))
 
-def import_export_directory():
+_IMPORT_EXPORT_DIR_DEFAULT = 'special://profile/addon_data/plugin.video.redlight/Import Export/'
+
+def import_export_directory_setting():
+	# Virtual path for Kodi browse dialogs (works on all platforms).
 	path = get_setting('redlight.import_export_directory', '')
-	if path in ('', 'None', None):
-		return translate_path(addon_profile())
-	return translate_path(path)
+	if path in ('', 'None', None, 'empty_setting'):
+		return _IMPORT_EXPORT_DIR_DEFAULT
+	return path
+
+def import_export_directory():
+	# Filesystem path for os.path / file I/O.
+	return translate_path(import_export_directory_setting())
+
+def ensure_import_export_directory():
+	path = import_export_directory()
+	make_directory(path)
+	return path
 
 def ai_model_active():
 	if get_setting('redlight.google_api', 'empty_setting') not in (None, 'None', '', 'empty_setting'): return True
@@ -159,15 +171,100 @@ def auto_enable_subs():
 def subtitles_source():
 	return get_setting('redlight.playback.subs_source', '0')
 
+def subtitles_source_options():
+	options = {'0': 'Local Subtitles'}
+	if submaker_manifest_configured(): options['1'] = 'SubMaker'
+	if opensubs_configured(): options['2'] = 'OpenSubtitles'
+	return options
+
+def refresh_playback_subs_source():
+	from caches.settings_cache import get_setting, set_setting
+	opts = subtitles_source_options()
+	current = str(get_setting('redlight.playback.subs_source', '0'))
+	if current not in opts:
+		if current == '2':
+			current = '1' if '1' in opts else '0'
+		elif current == '1':
+			current = '2' if '2' in opts else '0'
+		else:
+			current = '0'
+		set_setting('playback.subs_source', current)
+
 def submaker_enabled():
 	return subtitles_source() == '1'
 
+def opensubs_enabled():
+	return subtitles_source() == '2'
+
 def submaker_manifest():
 	manifest = get_setting('redlight.playback.submaker_manifest', 'empty_setting')
-	return '' if manifest == 'empty_setting' else manifest
+	if manifest == 'empty_setting': return ''
+	return manifest.strip()
+
+def submaker_manifest_configured():
+	manifest = submaker_manifest()
+	return bool(manifest) and 'manifest' in manifest
+
+def opensubs_api_key():
+	try:
+		from apis.opensubs_api import effective_api_key
+		return effective_api_key()
+	except: return ''
+
+def opensubs_username():
+	value = get_setting('redlight.playback.opensubs_username', 'empty_setting')
+	return '' if value in (None, '', '0', 'empty_setting') else str(value).strip()
+
+def opensubs_password():
+	value = get_setting('redlight.playback.opensubs_password', 'empty_setting')
+	return '' if value in (None, '', '0', 'empty_setting') else str(value).strip()
+
+def opensubs_configured():
+	return bool(opensubs_username()) and bool(opensubs_password())
+
+def subs_alert_fetch_configured():
+	return submaker_manifest_configured() or opensubs_configured()
 
 def submaker_language():
 	return get_setting('redlight.playback.submaker_language_name', 'English')
+
+def subs_language():
+	return submaker_language()
+
+FORCED_LOCAL_SUBS_LANGUAGE_INDEX = '42'
+
+def subs_language_is_forced_local():
+	return str(get_setting('redlight.playback.submaker_language', '0')) == FORCED_LOCAL_SUBS_LANGUAGE_INDEX
+
+def subs_language_for_download():
+	if subs_language_is_forced_local(): return 'English'
+	return subs_language()
+
+_KODI_SUBTITLE_LANG_SKIP = frozenset(('original', 'original only', 'mediadefault', 'default', 'forced only', 'forced'))
+
+def kodi_subtitle_language():
+	try:
+		import xbmc
+		value = xbmc.getSetting('locale.subtitlelanguage')
+	except: return ''
+	if not value: return ''
+	value = str(value).strip()
+	if value.lower() in _KODI_SUBTITLE_LANG_SKIP: return ''
+	try:
+		name = xbmc.convertLanguage(value, xbmc.ENGLISH_NAME)
+		if name and name.lower() not in ('unknown', ''): return name
+	except: pass
+	return value
+
+def subs_language_preferences():
+	if subs_language_is_forced_local(): return []
+	prefs = []
+	red_light = subs_language()
+	if red_light: prefs.append(red_light)
+	kodi_lang = kodi_subtitle_language()
+	if kodi_lang and (not red_light or kodi_lang.lower() != red_light.lower()):
+		prefs.append(kodi_lang)
+	return prefs
 
 def submaker_prefer_local():
 	return get_setting('redlight.playback.submaker_prefer_local', 'true') == 'true'
@@ -175,8 +272,15 @@ def submaker_prefer_local():
 def stingers_show():
 	return get_setting('redlight.stinger_alert.show', 'false') == 'true'
 
+def _alert_timing_mode(setting_id, default='1'):
+	value = get_setting('redlight.%s' % setting_id, default)
+	return {'0': 'off', '1': 'chapters', '2': 'subtitles'}.get(str(value), 'chapters')
+
+def stingers_alert_timing():
+	return _alert_timing_mode('stinger_alert.alert_timing', '1')
+
 def stingers_use_chapters():
-	return get_setting('redlight.stinger_alert.use_chapters', 'false') == 'true'
+	return stingers_alert_timing() == 'chapters'
 
 def stingers_percentage():
 	return int(get_setting('redlight.stinger_alert.window_percentage', '90'))
@@ -195,24 +299,54 @@ def autoscrape_next_episode():
 	if not auto_play('episode') and get_setting('redlight.autoscrape_next_episode', 'false') == 'true': return True
 	else: return False
 
+def any_alert_uses_subtitle_timing(media_type='episode'):
+	if media_type == 'episode':
+		if autoplay_next_episode() and _alert_timing_mode('autoplay_alert_timing') == 'subtitles': return True
+		if autoscrape_next_episode() and _alert_timing_mode('autoscrape_alert_timing') == 'subtitles': return True
+	elif media_type == 'movie' and stingers_show() and stingers_alert_timing() == 'subtitles':
+		return True
+	return False
+
+def subs_alert_fetch_enabled(media_type='episode'):
+	return any_alert_uses_subtitle_timing(media_type) and subs_alert_fetch_configured()
+
 def autoscrape_confirm():
 	return get_setting('redlight.autoscrape_confirm', 'false') == 'true'
 
 def autoplay_prescrape(scrape_provider):
 	return get_setting('redlight.autoplay.%s' % scrape_provider, 'false') == 'true'
 
+NEXTEP_SCRAPE_MARGIN_SEC = 30
+NEXTEP_COMMAND_HEADROOM_SEC = 15
+NEXTEP_AUTOSCRAPE_MIN_HEADROOM_SEC = 90
+NEXTEP_ALERT_MAX_REMAINING_SEC = 20
+NEXTEP_ALERT_MIN_REMAINING_SEC = 20
+NEXTEP_CREDITS_ENTRY_GAP_SEC = 15
+NEXTEP_STOP_NOTIFY_REMAINING_SEC = 90
+
+def nextep_pipeline_headroom(play_type, scraper_time, still_watching_due=False):
+	# Scrape budget (results.timeout + NEXTEP_SCRAPE_MARGIN_SEC) plus time for still-watching / autoscrape confirm dialogs.
+	headroom = int(scraper_time)
+	if 'autoplay' in play_type and still_watching_due:
+		headroom += NEXTEP_COMMAND_HEADROOM_SEC
+	if 'autoscrape' in play_type and autoscrape_confirm():
+		headroom += NEXTEP_COMMAND_HEADROOM_SEC
+	if 'autoscrape' in play_type:
+		headroom = max(headroom, NEXTEP_AUTOSCRAPE_MIN_HEADROOM_SEC)
+	return headroom
+
 def auto_nextep_settings(play_type):
 	play_type = 'autoplay' if play_type == 'autoplay_nextep' else 'autoscrape'
 	window_percentage = 100 - int(get_setting('redlight.%s_next_window_percentage' % play_type, '95'))
-	use_chapters = get_setting('redlight.%s_use_chapters' % play_type, 'true') == 'true'
+	alert_timing = _alert_timing_mode('%s_alert_timing' % play_type, '1')
 	watching_check = int(get_setting('redlight.autoplay_watching_check', '3'))
-	scraper_time = int(get_setting('redlight.results.timeout', '60')) + 20
+	scraper_time = int(get_setting('redlight.results.timeout', '60')) + NEXTEP_SCRAPE_MARGIN_SEC
 	if play_type == 'autoplay':
 		alert_method = int(get_setting('redlight.autoplay_alert_method', '0'))
 		default_action = {'0': 'play', '1': 'cancel', '2': 'pause'}[get_setting('redlight.autoplay_default_action', '1')]
 	else: alert_method, default_action = '', ''
 	return {'scraper_time': scraper_time, 'window_percentage': window_percentage, 'alert_method': alert_method,
-			'default_action': default_action, 'use_chapters': use_chapters, 'watching_check': watching_check}
+			'default_action': default_action, 'alert_timing': alert_timing, 'watching_check': watching_check}
 
 def filter_status(filter_type):
 	return int(get_setting('redlight.filter.%s' % filter_type, '0'))
@@ -633,12 +767,6 @@ def nextep_sort_key():
 
 def nextep_sort_direction():
 	return int(get_setting('redlight.nextep.sort_order', '0')) == 0
-
-def update_delay():
-	return int(get_setting('redlight.update.delay', '45'))
-
-def update_action():
-	return int(get_setting('redlight.update.action', '2'))
 
 def _rescrape_defaults():
 	return [('cache_ignored', '1', '0'), ('imdb_year', '0', '1'), ('with_all', '0', '2'), ('episode_group', '0', '3'), ('ignore_filters', '0', '4'), ('full_scrape', '2', '5')]
