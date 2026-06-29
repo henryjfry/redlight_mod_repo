@@ -298,11 +298,7 @@ class RedLightMonitor(Monitor):
 		Thread(target=TraktMonitor().run).start()
 		Thread(target=SimklMonitor().run).start()
 		Thread(target=MdblistMonitor().run).start()
-		
-		import modules.playlist as playlist_module
-		self.player_monitor = playlist_module.PlayerMonitor()
-
-		#Thread(target=UpdateCheck().run).start()
+		Thread(target=UpdateCheck().run).start()
 		Thread(target=WidgetRefresher().run).start()
 		try: AutoStart().run()
 		except Exception as e: kodi_utils.logger('AutoStart', str(e))
