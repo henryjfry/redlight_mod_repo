@@ -8,10 +8,6 @@ from threading import Thread
 from caches.settings_cache import get_setting, set_setting, sync_settings
 from modules import kodi_utils
 
-import xbmc, xbmcgui
-from modules.player import RedLightPlayer
-import uuid
-
 pause_services_prop = 'redlight.pause_services'
 firstrun_update_prop = 'redlight.firstrun_update'
 current_skin_prop = 'redlight.current_skin'
@@ -283,45 +279,6 @@ class AutoStart:
 		if auto_start_redlight(): kodi_utils.run_addon()
 		return kodi_utils.logger('Red Light', 'AutoStart Service Finished')
 
-class PlayerMonitor(xbmc.Player):
-	def __init__(self):
-		xbmc.Player.__init__(self)
-		self.player = xbmc.Player()
-
-	def onPlayBackStarted(self):
-		player  = RedLightPlayer()
-		try:
-			current_ep = player.get_current_episode_from_player()
-			TMDbHelper_PlayerInfoString = xbmcgui.Window(10000).getProperty('TMDbHelper.PlayerInfoString')
-			if current_ep:
-				data = json.loads(TMDbHelper_PlayerInfoString)
-				cur_season, cur_episode = current_ep
-				TMDbHelper_NEW_PlayerInfoString = {'tmdb_type': data['tmdb_type'], 'tmdb_id': str(data['tmdb_id']), 'imdb_id': str(data['imdb_id']), 'tvdb_id': str(data['tvdb_id']), 'season': cur_season, 'episode': cur_episode}
-				xbmcgui.Window(10000).setProperty('TMDbHelper.PlayerInfoString', f'{TMDbHelper_NEW_PlayerInfoString}'.replace('\'','"'))
-		except Exception as e:
-			xbmc.log(f"[redlight] Decode failed: {e}", xbmc.LOGERROR)
-		get_onPlayBackStarted = xbmcgui.Window(10000).getProperty('fenlight.onPlayBackStarted')
-		if get_onPlayBackStarted == 'onPlayBackStarted':
-			monitor_id = str(uuid.uuid4())
-			xbmcgui.Window(10000).setProperty('fenlight.monitor_id', monitor_id)
-			RedLightPlayer._monitor_running = True
-			xbmcgui.Window(10000).clearProperty('fenlight.onPlayBackStarted')
-			Thread(target=player.monitor_playlist,args=(monitor_id,), daemon=True).start()
-
-
-	def onPlayBackStopped(self):
-		xbmcgui.Window(10000).clearProperty('script.trakt.ids')
-		xbmcgui.Window(10000).clearProperty('TMDbHelper.PlayerInfoString')
-		xbmcgui.Window(10000).clearProperty('subs.player_filename')
-		#xbmcgui.Window(10000).clearProperty('fenlight.onPlayBackStarted')
-
-	def onPlayBackEnded(self):
-		xbmcgui.Window(10000).clearProperty('script.trakt.ids')
-		xbmcgui.Window(10000).clearProperty('TMDbHelper.PlayerInfoString')
-		xbmcgui.Window(10000).clearProperty('subs.player_filename')
-		#xbmcgui.Window(10000).clearProperty('fenlight.onPlayBackStarted')
-
-
 class RedLightMonitor(Monitor):
 	def __init__ (self):
 		Monitor.__init__(self)
@@ -338,10 +295,13 @@ class RedLightMonitor(Monitor):
 		except Exception as e: kodi_utils.logger('RestoreAddonXml', str(e))
 		Thread(target=BootstrapSettings().run).start()
 		start_custom_windows_prepare()
-		self.player_monitor = PlayerMonitor()
 		Thread(target=TraktMonitor().run).start()
 		Thread(target=SimklMonitor().run).start()
 		Thread(target=MdblistMonitor().run).start()
+		
+		import modules.playlist as playlist_module
+		self.player_monitor = playlist_module.PlayerMonitor()
+
 		#Thread(target=UpdateCheck().run).start()
 		Thread(target=WidgetRefresher().run).start()
 		try: AutoStart().run()
