@@ -493,6 +493,9 @@ class RedLightPlayer(xbmc.Player):
 			ku.set_property('script.trakt.ids', json.dumps(trakt_ids))
 			if self.playing_filename: ku.set_property('subs.player_filename', self.playing_filename)
 		except: pass
+		import modules.playlist as playlist_module
+		return playlist_module.set_playback_properties_additional(self, trakt_ids)
+
 
 	def safe_stop(self):
 		try:

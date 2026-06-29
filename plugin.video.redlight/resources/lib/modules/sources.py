@@ -81,8 +81,8 @@ class Sources():
 		if params: self.params = params
 		params_get = self.params.get
 		self.background = params_get('background', 'false') == 'true'
-		if self._playback_already_active() and not self.background:
-			return
+		#if self._playback_already_active() and not self.background:
+		#	return
 		self.play_type = params_get('play_type', '')
 		self.prescrape = params_get('prescrape', self.prescrape) == 'true'
 		self.random, self.random_continual = params_get('random', 'false') == 'true', params_get('random_continual', 'false') == 'true'
@@ -115,8 +115,8 @@ class Sources():
 		self._playback_failed_notified = False
 		self.get_meta()
 		self.determine_scrapers_status()
-		if not self.prescrape and not self._playback_skips_prescrape_override() and settings.prescrape_enabled(self.media_type, self.active_internal_scrapers):
-			self.prescrape = True
+		#if not self.prescrape and not self._playback_skips_prescrape_override() and settings.prescrape_enabled(self.media_type, self.active_internal_scrapers):
+		#	self.prescrape = True
 		self.sleep_time, self.provider_sort_ranks, self.scraper_settings = 100, settings.provider_sort_ranks(), settings.scraping_settings()
 		self.include_prerelease_results = settings.include_prerelease_results()
 		self.limit_resolve = settings.limit_resolve()
@@ -124,8 +124,10 @@ class Sources():
 		self.sort_function, self.quality_filter = settings.results_sort_order(), self._quality_filter()
 		self.include_unknown_size = get_setting('redlight.results.size_unknown', 'false') == 'true'
 		self.make_search_info()
-		if self.autoscrape: self.autoscrape_nextep_handler()
-		else: return self.get_sources()
+		#if self.autoscrape: self.autoscrape_nextep_handler()
+		#else: return self.get_sources()
+		import modules.playlist as playlist_module
+		return playlist_module.sources_def_playback_prep_return(self, self.params)
 
 	def check_episode_group(self):
 		try:
@@ -1233,11 +1235,17 @@ class Sources():
 		self.progress_dialog.enable_resolver()
 
 	def _make_resume_dialog(self, percent):
+		import modules.playlist as playlist_module
+		return playlist_module.make_resume_choice()
+
 		if not self.progress_dialog: self._make_progress_dialog()
 		self.progress_dialog.enable_resume(percent)
 		return self.progress_dialog.resume_choice
 
 	def _make_nextep_dialog(self, default_action='cancel'):
+		import modules.playlist as playlist_module
+		return playlist_module.NEW_nextep_dialog(self, default_action)
+
 		try: action = open_window(('windows.playback_notifications', 'NextEpisode'), 'playback_notifications.xml', meta=self.meta, default_action=default_action)
 		except: action = 'cancel'
 		return action
@@ -1509,6 +1517,9 @@ class Sources():
 		return player
 
 	def play_file(self, results, source={}):
+		import modules.playlist as playlist_module
+		return playlist_module.playlist_play_file(self, results, source)
+
 		playable_results = [i for i in results if 'Uncached' not in i.get('cache_provider', '')]
 		if not playable_results and not source:
 			return self._no_results()
@@ -1840,6 +1851,8 @@ class Sources():
 		except: pass
 		if self._user_cancelled_resolve():
 			return None
+		import modules.playlist as playlist_module
+		url = playlist_module.sources_def_resolve_sources_fix_debrid(self,url, item)
 		return url
 
 	def resolve_cached(self, debrid_provider, item_url, _hash, title, season, episode, pack):
@@ -1868,8 +1881,11 @@ class Sources():
 					else:
 						url = tb.unrestrict_link(item_id)
 					url = tb.coerce_play_url(url) or url
+#				elif any(i in scrape_provider for i in ('rd_', 'ad_', 'tb_')):
+#					url = debrid_function().unrestrict_link(item_id)
 				elif any(i in scrape_provider for i in ('rd_', 'ad_', 'tb_')):
-					url = debrid_function().unrestrict_link(item_id)
+					import modules.playlist as playlist_module
+					url = playlist_module.sources_def_resolve_internal_fix_debrid(debrid_function, scrape_provider, direct_debrid_link, url_dl, item_id)
 				else:
 					if '_cloud' in scrape_provider: item_id = debrid_function().get_item_details(item_id)['link']
 					url = debrid_function().add_headers_to_url(item_id)
