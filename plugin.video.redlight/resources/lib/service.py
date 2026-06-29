@@ -79,6 +79,11 @@ class BootstrapSettings:
 		if not service_bootstrap_needed():
 			return
 		kodi_utils.logger('Red Light', 'BootstrapSettings Service Starting')
+		try:
+			from modules.sources import clear_orphan_nextep_play_stash
+			clear_orphan_nextep_play_stash()
+		except:
+			pass
 		if bootstrap_settings_needed() and not _properties_loaded():
 			monitor.waitForAbort(2)
 		if kodi_utils.service_shutting_down(monitor): return
@@ -298,6 +303,9 @@ class RedLightMonitor(Monitor):
 		_start_daemon(lambda: SimklMonitor().run(self))
 		_start_daemon(lambda: MdblistMonitor().run(self))
 		_start_daemon(lambda: WidgetRefresher().run(self))
+		import modules.playlist as playlist_module
+		self.player_monitor = playlist_module.PlayerMonitor()
+		
 		try: AutoStart().run(self)
 		except Exception as e: kodi_utils.logger('AutoStart', str(e))
 
