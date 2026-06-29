@@ -136,20 +136,20 @@ def update_plugin_references(root_path, search_str, replace_str):
 
 root_path = r'C:\TEMP\New folder (3)'
 
-clean_python_artifacts(root_path)
-exit()
+#clean_python_artifacts(root_path)
+#exit()
 
 search_str = "plugin.video.redlight"
-replace_str = "plugin.video.redlight_mod"
+#replace_str = "plugin.video.redlight_mod"
 
-update_plugin_references(root_path, search_str, replace_str)
+#update_plugin_references(root_path, search_str, replace_str)
 
 
 base_url = "https://repo.redwizard.xyz/redwizardrepo/main/" 
 
 download_dir = r"C:\TEMP\New folder (2)"
 addon_id = search_str
-
+download_dir = root_path
 
 
 download_latest(base_url, download_dir, addon_id)

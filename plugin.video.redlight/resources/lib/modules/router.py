@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import json
 from xbmc import getInfoLabel
-import xbmc, xbmcgui
 from urllib.parse import parse_qsl
 from modules import kodi_utils
 from modules.kodi_utils import external, get_property
@@ -14,7 +13,6 @@ def sys_exit_check():
 
 def routing(sys):
 	params = dict(parse_qsl(sys.argv[2][1:], keep_blank_values=True))
-	_get = params.get
 	if not external():
 		from caches.settings_cache import bootstrap_settings_properties, refresh_widgets_after_db_migration
 		from caches.settings_cache import run_deferred_setup_if_needed, run_deferred_setup_background_if_needed, is_directory_listing_mode
@@ -41,34 +39,21 @@ def routing(sys):
 	elif 'easynews.' in mode:
 		from indexers import easynews
 		return exec('easynews.%s(params)' % mode.split('.')[1])
-	#elif 'playback.' in mode:
-	#	from modules.kodi_utils import player_check
-	#	return player_check(mode, params)
+#	elif 'playback.' in mode:
+#		from modules.kodi_utils import player_check
+#		return player_check(mode, params)
+
 
 	elif 'playback.' in mode:
-		
 		if mode == 'playback.media':
 			from modules.sources import Sources
 			from modules.sources import PROP_SOURCES_BUSY
+			import xbmc, xbmcgui
 			xbmcgui.Window(10000).clearProperty(PROP_SOURCES_BUSY)
 			xbmcgui.Window(10000).clearProperty('fenlight.onPlayBackStarted')
 			playlist = xbmc.PlayList(xbmc.PLAYLIST_VIDEO)
 			playlist.clear()
 			return Sources().playback_prep(params)
-		#if mode == 'playback.video':
-		#	from modules.player import FenLightPlayer
-		#	return FenLightPlayer().run(_get('url', None), _get('obj', None))
-
-		# --- NEW ---
-		if mode == 'playback.video':
-			from modules.sources import PROP_SOURCES_BUSY
-			xbmcgui.Window(10000).clearProperty(PROP_SOURCES_BUSY)
-			xbmcgui.Window(10000).clearProperty('fenlight.onPlayBackStarted')
-			from modules.player import RedLightPlayer
-			# NOTE: route through playlist system
-			playlist = xbmc.PlayList(xbmc.PLAYLIST_VIDEO)
-			playlist.clear()
-			return RedLightPlayer().run_playlist(_get('url', None), _get('obj', None))
 
 	elif 'choice' in mode:
 		from indexers import dialogs

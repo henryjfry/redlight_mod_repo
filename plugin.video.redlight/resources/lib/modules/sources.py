@@ -20,23 +20,6 @@ PROP_RESOLVE_CANCEL = 'redlight.resolve_cancelled'
 PROP_PLAY_OPENING = 'redlight.play_opening'
 PROP_BROWSE_RETURN_SOURCES = 'redlight.browse_return_sources'
 
-import base64
-import xbmc, os, urllib.parse, threading, xbmcvfs, requests, xbmcgui
-import uuid
-
-from inspect import currentframe, getframeinfo
-#xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
-
-
-def make_sorttitle(meta):
-	try:
-		if meta.get('mediatype') == 'movie':
-			return base64.b64encode(f"{meta.get('tmdb_id')}_movie".encode()).decode()
-		else:
-			return base64.b64encode(f"{meta.get('tmdb_id')}_{meta.get('season')}_{meta.get('episode')}".encode()).decode()
-	except:
-		return ''
-
 class Sources():
 	def __init__(self):
 		self.params = {}
@@ -141,22 +124,10 @@ class Sources():
 		self.sort_function, self.quality_filter = settings.results_sort_order(), self._quality_filter()
 		self.include_unknown_size = get_setting('redlight.results.size_unknown', 'false') == 'true'
 		self.make_search_info()
-		if self.params.get('autoplay', '') == 'false':
-			#xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
-			from caches import base_cache
-			cache_list = ('rd_cloud','internal_scrapers','external_scrapers','pm_cloud','rd_cloud','ad_cloud','oc_cloud','tb_cloud','pm_cloud', 'rd_cloud', 'ad_cloud', 'oc_cloud', 'tb_cloud', 'folders')
-			results2 = []
-			for cache_type in cache_list:
-				success = base_cache.clear_cache(cache_type, silent=True)
-				results2.append(success)
-			#xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
-			#xbmc.log(str(results2), level=xbmc.LOGINFO)
-
-		if self.autoscrape: 
-			#self.autoscrape_nextep_handler()
-			return self.get_sources()
-		else: 
-			return self.get_sources()
+		#if self.autoscrape: self.autoscrape_nextep_handler()
+		#else: return self.get_sources()
+		import modules.playlist as playlist_module
+		return playlist_module.sources_def_playback_prep_return(self, self.params)
 
 	def check_episode_group(self):
 		try:
@@ -219,10 +190,8 @@ class Sources():
 			kodi_utils.set_property(PROP_SOURCES_BUSY, 'true')
 			kodi_utils.set_property(PROP_SOURCES_OWNER, self._sources_busy_owner)
 		self._get_sources_depth = depth + 1
-		#try:
-		if 1==1:
-			if not self.progress_dialog and not self.background: 
-				self._make_progress_dialog()
+		try:
+			if not self.progress_dialog and not self.background: self._make_progress_dialog()
 			results = []
 			self.check_prescrape_ran = False
 			if self.prescrape and any(x in self.active_internal_scrapers for x in self.default_internal_scrapers):
@@ -231,8 +200,7 @@ class Sources():
 					self.check_prescrape_ran = bool(self.prescrape_scrapers)
 					if results:
 						results = self.process_results(results)
-						if not self._can_continue_full_scrape(): 
-							self.prescrape = False
+						if not self._can_continue_full_scrape(): self.prescrape = False
 			if self._user_cancelled_scrape():
 				return self._finish_scrape_cancel()
 			if not results:
@@ -246,28 +214,23 @@ class Sources():
 				self.prescrape = False
 				self._release_empty_prescrape_cloud_scrapers()
 				self.prepare_internal_scrapers()
-				if self.active_external: 
-					self.activate_external_providers()
-				elif not self.active_internal_scrapers: 
-					self._kill_progress_dialog()
+				if self.active_external: self.activate_external_providers()
+				elif not self.active_internal_scrapers: self._kill_progress_dialog()
 				self.orig_results = self.collect_results()
 				if self._user_cancelled_scrape():
 					return self._finish_scrape_cancel()
-				if not self.orig_results: 
-					self._kill_progress_dialog()
+				if not self.orig_results: self._kill_progress_dialog()
 				results = self.process_results(self.orig_results)
 			if self._user_cancelled_scrape():
 				return self._finish_scrape_cancel()
 			if not results:
 				return self._process_post_results()
-			if self.autoscrape: 
-				return results
-			else: 
-				return self.play_source(results)
-		#finally:
-		#	self._get_sources_depth = max(0, getattr(self, '_get_sources_depth', 1) - 1)
-		#	if self._get_sources_depth == 0:
-		#		self._release_sources_busy()
+			if self.autoscrape: return results
+			else: return self.play_source(results)
+		finally:
+			self._get_sources_depth = max(0, getattr(self, '_get_sources_depth', 1) - 1)
+			if self._get_sources_depth == 0:
+				self._release_sources_busy()
 
 	def collect_results(self):
 		if self.prescrape_sources:
@@ -636,8 +599,7 @@ class Sources():
 		return sourceDict
 
 	def _can_continue_full_scrape(self):
-		if self.active_external: 
-			return True
+		if self.active_external: return True
 		remaining = [i for i in self.active_internal_scrapers if i not in self.remove_scrapers]
 		return bool(remaining)
 
@@ -699,8 +661,7 @@ class Sources():
 			autoplay_queue = results
 			if self._effective_autoplay():
 				external = self._external_autoplay_candidates(results)
-				if external: 
-					autoplay_queue = external
+				if external: autoplay_queue = external
 			return self.play_file(autoplay_queue)
 		prescrape_autoplay = self._prescrape_autoplay_candidates(results)
 		if prescrape_autoplay:
@@ -1274,40 +1235,20 @@ class Sources():
 		self.progress_dialog.enable_resolver()
 
 	def _make_resume_dialog(self, percent):
-		#if not self.progress_dialog: self._make_progress_dialog()
-		#self.progress_dialog.enable_resume(percent)
-		#return self.progress_dialog.resume_choice
-		try: 
-			playlist = xbmc.PlayList(xbmc.PLAYLIST_VIDEO)
-			pl_size = playlist.size()
-			xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
-			xbmc.log(str(playlist.size())+'===>pl_size', level=xbmc.LOGINFO)
-			if xbmc.Player().isPlayingVideo() == True:
-				return 'start_over'
-			resume_choice = 'resume'
-			return resume_choice
-		except:
-			return 'resume'
+		import modules.playlist as playlist_module
+		return playlist_module.make_resume_choice()
 
-	#def _make_nextep_dialog(self, default_action='cancel'):
-	#	try: action = open_window(('windows.playback_notifications', 'NextEpisode'), 'playback_notifications.xml', meta=self.meta, default_action=default_action)
-	#	except: action = 'cancel'
-	#	return action
+		if not self.progress_dialog: self._make_progress_dialog()
+		self.progress_dialog.enable_resume(percent)
+		return self.progress_dialog.resume_choice
 
 	def _make_nextep_dialog(self, default_action='cancel'):
-		try:
-			self._kill_progress_dialog()
-			kodi_utils.close_all_dialog()
-			from threading import Thread
-			def _run():
-				try:
-					open_window(('windows.playback_notifications', 'NextEpisode'), 'next_episode.xml', meta=self.meta, default_action=default_action)
-				except:
-					pass
-			Thread(target=_run, daemon=True).start()
-		except:
-			pass
-		return None
+		import modules.playlist as playlist_module
+		return playlist_module.NEW_nextep_dialog(self, default_action)
+
+		try: action = open_window(('windows.playback_notifications', 'NextEpisode'), 'playback_notifications.xml', meta=self.meta, default_action=default_action)
+		except: action = 'cancel'
+		return action
 
 	def _make_still_watching_dialog(self, check_text, heading='Still Watching?', right_align=False):
 		try: action = open_window(('windows.playback_notifications', 'StillWatching'), 'playback_notifications.xml', meta=self.meta, check_text=check_text,
@@ -1575,140 +1516,10 @@ class Sources():
 		self._cleanup_browse_transfer(debrid_provider, debrid_files, is_pack=is_pack)
 		return player
 
-
-
-	def run_source_select_flow(self, results):
-
-		while True:
-
-			window_format, window_number = settings.results_format()
-
-			window_result = open_window(
-				('windows.sources', 'SourcesResults'),
-				'sources_results.xml',
-				window_format=window_format,
-				window_id=window_number,
-				results=results,
-				meta=self.meta,
-				sources_ref=self,
-				episode_group_label=self.episode_group_label,
-				scraper_settings=self.scraper_settings,
-				prescrape=self.prescrape,
-				filters_ignored=self.filters_ignored,
-				uncached_results=self.uncached_results,
-				cache_check_override=self.cache_check_override
-			)
-
-			if not window_result:
-				self._kill_progress_dialog()
-				return None, None
-
-			action, chosen_item = window_result
-
-			# ✅ FULL ORIGINAL BEHAVIOUR
-			if not action:
-
-				if kodi_utils.get_property(PROP_BROWSE_RETURN_SOURCES) == 'true':
-					kodi_utils.clear_property(PROP_BROWSE_RETURN_SOURCES)
-					self._wait_active_playback_end()
-					continue
-
-				if self._playback_already_active():
-					self._kill_progress_dialog(join_timeout=1.0)
-					self.resolve_dialog_made = False
-					return None, None
-
-				self._kill_progress_dialog(join_timeout=3.0)
-				self.resolve_dialog_made = False
-				return None, None
-
-			# ✅ RETURN SELECTION TO play_file
-			elif action == 'play':
-				kodi_utils.clear_property(PROP_RESOLVE_CANCEL)
-
-				try:
-					self._close_sources_results_window()
-				except:
-					pass
-				return chosen_item, results
-
-			# ✅ FULL SEARCH (identical logic)
-			elif self.prescrape and action == 'perform_full_search':
-
-				self._kill_progress_dialog(join_timeout=1.0)
-
-				if not self.progress_dialog and not self.background:
-					self._make_progress_dialog()
-
-				# ✅ EXACT ORIGINAL RESET
-				self.prescrape = False
-				self.autoscrape = True
-				self.clear_properties = True
-				self.filters_ignored = self.ignore_scrape_filters
-				self.prescrape_sources = []                 # 🔥 MISSING
-				self.prescrape_ran_scrapers = set()         # 🔥 MISSING
-
-
-				#self.sources = []
-				self.orig_results = []
-				self.threads, self.providers = [], []
-				self.prescrape_scrapers, self.prescrape_threads = [], []
-				self.uncached_results, self.cloud_scraper_names = [], []
-				self.active_folders, self.folder_info = False, []
-				self.internal_scraper_names, self.resolve_dialog_made = [], False
-
-				
-				# ✅ CRITICAL: reset remove_scrapers
-				self.remove_scrapers = ['external']         # 🔥 VERY IMPORTANT
-
-				# ✅ also clear cloud autoplay flags
-				self.cloud_prescrape_autoplay = False       # 🔥 CRUCIAL
-
-				if not self.ignore_scrape_filters:
-					kodi_utils.clear_property('fs_filterless_search')
-
-				self._prepare_external_only_followup()
-				#xbmc.log(str(results), xbmc.LOGINFO)
-				# ✅ RUN FULL PIPELINE
-				new_results = self.get_sources()
-				#xbmc.log(str(new_results), xbmc.LOGINFO)
-
-				# ✅ IMPORTANT: validate result type
-				if not new_results or not isinstance(new_results, list):
-					return None, None
-
-				#results = new_results
-				# ✅ merge instead of replace
-				existing_ids = set(i.get('id') for i in results)
-
-				merged = results[:]
-
-				for item in new_results:
-					item_id = item.get('id')
-					if not item_id or item_id not in existing_ids:
-						merged.append(item)
-
-				results = merged
-
-				continue
-
-			# ✅ CACHE RE-SCRAPE
-			elif action == 'cache_change_rescrape':
-
-				self.cache_check_override = chosen_item == 'true'
-				self._reset_scrape_state(keep_disabled_ext_ignored=True)
-
-				new_results = self.get_sources()
-
-				if not new_results or not isinstance(new_results, list):
-					return None, None
-
-				results = new_results
-				continue
-
-
-
 	def play_file(self, results, source={}):
+		import modules.playlist as playlist_module
+		return playlist_module.playlist_play_file(self, results, source)
+
 		playable_results = [i for i in results if 'Uncached' not in i.get('cache_provider', '')]
 		if not playable_results and not source:
 			return self._no_results()
@@ -1717,72 +1528,26 @@ class Sources():
 		self._claim_resolve_busy()
 		url = None
 		monitor = None
-		#try:
-		if 1==1:
+		try:
 			self.playback_successful, self.cancel_all_playback = None, False
 			self._resolve_user_cancelled = False
 			self._prepare_resolve_ui()
 			defer_stop_for_nextep = self.background and (self.autoplay_nextep or self.autoscrape_nextep or self.play_type == 'random_continual' or self.random_continual)
-			#if not defer_stop_for_nextep:
-			#	self._stop_active_playback()
+			if not defer_stop_for_nextep:
+				self._stop_active_playback()
 			retry_easynews = settings.easynews_playback_method('retry')
 			retry_easynews_limit = settings.easynews_playback_method_retries()
 			kodi_utils.hide_busy_dialog()
-			# ✅ EMBEDDED SOURCE SELECT (SAFE CONDITIONS ONLY)
-			if not source:
-				
-				playlist = xbmc.PlayList(xbmc.PLAYLIST_VIDEO)
-				if self.params.get('autoplay','') == 'false':
-					self.autoplay = False
-
-				should_show_select = (
-					not self.autoplay and
-					not self.background and
-					playlist.size() == 0
-				)
-
-				if should_show_select:
-					source, results = self.run_source_select_flow(results)
-
-					if not source:
-						xbmc.log("PLAY_FILE: user cancelled selection", xbmc.LOGINFO)
-						return
-
-
-
-			playable_results = results
-			#if not source: 
-			#	source = playable_results[0]
-			#items = [source]
-			#old_items = items
-			#if not self.limit_resolve:
-			#	source_index = playable_results.index(source)
-			#	queue_tail = playable_results[source_index + 1:]
-			#	queue_head = playable_results[:source_index]
-			#	queue_head.reverse()
-			#	items = [source] + queue_tail + queue_head
-			#except:
-			#	items = old_items
-			#	pass
-			#processed_items = []
-			#processed_items_append = processed_items.append
-			
-			#results = [i for i in results if not 'Uncached' in i.get('cache_provider', '')]
-			if not source: source = results[0]
+			if not source: source = playable_results[0]
 			items = [source]
-			#xbmc.log(str(items)+'===>OPEN_INFO', level=xbmc.LOGINFO)
-			if not self.limit_resolve: 
-				source_index = results.index(source)
-				results.remove(source)
-				items_prev = results[:source_index]
-				items_prev.reverse()
-				items_next = results[source_index:]
-				items = items + items_next + items_prev
-			else:
-				results.remove(source)
+			if not self.limit_resolve:
+				source_index = playable_results.index(source)
+				queue_tail = playable_results[source_index + 1:]
+				queue_head = playable_results[:source_index]
+				queue_head.reverse()
+				items = [source] + queue_tail + queue_head
 			processed_items = []
 			processed_items_append = processed_items.append
-
 			for count, item in enumerate(items, 1):
 				resolve_item = dict(item)
 				provider = item['scrape_provider']
@@ -1811,219 +1576,121 @@ class Sources():
 			if self.playback_percent == None:
 				self._finish_resolve_cancel()
 				return
-			if not self.resolve_dialog_made: 
-				self._make_resolve_dialog()
-			if self.background: 
-				kodi_utils.sleep(1000)
+			if not self.resolve_dialog_made: self._make_resolve_dialog()
+			if self.background: kodi_utils.sleep(1000)
 			monitor = kodi_utils.kodi_monitor()
-			player = RedLightPlayer()
 			for count, item in enumerate(items, 1):
-				#try:
-				if 1==1:
-					kodi_utils.hide_busy_dialog()
-					if not self.progress_dialog: 
+				try:
+					if self._resolve_user_cancelled or self.cancel_all_playback:
 						break
-
-					self.progress_dialog.reset_is_cancelled()
+					kodi_utils.hide_busy_dialog()
+					if not self.progress_dialog:
+						if self._user_cancelled_resolve():
+							self._resolve_user_cancelled = True
+							self.cancel_all_playback = True
+							break
+						if not self.background:
+							self._make_progress_dialog()
+						if not self.progress_dialog:
+							break
+					if not self._user_cancelled_resolve():
+						if count > 1:
+							prev = items[count - 2]
+							if prev.get('scrape_provider') != item.get('scrape_provider'):
+								self.progress_dialog.reset_is_cancelled()
+						else:
+							self.progress_dialog.reset_is_cancelled()
 					self.progress_dialog.update_resolver(text=item['resolve_display'])
 					self.progress_dialog.busy_spinner()
-					#if self._resolve_user_cancelled or self.cancel_all_playback:
-					#	break
-					#kodi_utils.hide_busy_dialog()
-					#if not self.progress_dialog:
-					#	if self._user_cancelled_resolve():
-					#		self._resolve_user_cancelled = True
-					#		self.cancel_all_playback = True
-					#		break
-					#	if not self.background:
-					#		self._make_progress_dialog()
-					#	if not self.progress_dialog:
-					#		break
-					#if not self._user_cancelled_resolve():
-					#	if count > 1:
-					#		prev = items[count - 2]
-					#		if prev.get('scrape_provider') != item.get('scrape_provider'):
-					#			self.progress_dialog.reset_is_cancelled()
-					#	else:
-					#		self.progress_dialog.reset_is_cancelled()
-					#self.progress_dialog.update_resolver(text=item['resolve_display'])
-					#self.progress_dialog.busy_spinner()
-					#if count > 1:
-					#	kodi_utils.sleep(200)
-					#	try:
-					#		del player
-					#	except Exception:
-					#		pass
-					url, self.playback_successful, self.cancel_all_playback = None, None, False
+					if count > 1:
+						kodi_utils.sleep(200)
+						try:
+							del player
+						except Exception:
+							pass
+					url, self.playback_successful = None, None
 					self.playing_filename = item['name']
 					self.playing_item = item
-					#url = self.resolve_sources(item)
-					url = self._resolve_sources_wait(item)
-					if url:
-						url = self._ensure_play_headers(url, item)
-					#xbmc.log(url, xbmc.LOGINFO)
-					#if not url:
-					#	continue
-					if not self._is_valid_playable_url(url):
-						xbmc.log(f"INVALID URL - skipping: {str(url)}", xbmc.LOGINFO)
-						continue
-
-					player.set_constants(url, self)
-					listitem = player.make_listing()
-
-					listitem.setProperty('IsPlayable', 'true')
-					listitem.setPath(url)
-
-					# ✅ SORTTITLE
-					#try:
-					if 1==1:
-						sorttitle_b64 = make_sorttitle(self.meta)
-						info_tag = listitem.getVideoInfoTag()
-						info_tag.setSortTitle(sorttitle_b64)
-						listitem.getVideoInfoTag().setSortTitle(sorttitle_b64)
-					#except:
-					#	pass
-
-					playlist = xbmc.PlayList(xbmc.PLAYLIST_VIDEO)
-
-					# ✅ DUPLICATE CHECK
-					for i in range(playlist.size()):
-						try:
-							existing = playlist[i].getVideoInfoTag().getSortTitle()
-							if existing == sorttitle_b64:
-								return
-						except:
-							continue
-					xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
-					xbmc.log(str(url), xbmc.LOGINFO)
-					playlist.add(url, listitem)
-
-					# ✅ START ONLY FIRST ITEM
-					if playlist.size() == 1:
-						#player.play(playlist)
-						self.progress_dialog.busy_spinner('false')
-						xbmc.sleep(200)
-						player.play(playlist, listitem)
-						#xbmc.Player().play(playlist)
-						# ✅ GUARANTEED monitor start
-						try:
-							#Thread(target=player.monitor_playlist, daemon=True).start()
-							monitor_id = str(uuid.uuid4())
-							xbmcgui.Window(10000).setProperty('fenlight.monitor_id', monitor_id)
-							if not RedLightPlayer._monitor_running:
-								RedLightPlayer._monitor_running = True
-								Thread(target=player.monitor_playlist,args=(monitor_id,), daemon=True).start()
-						except Exception as e:
-							xbmc.log(f"MONITOR START ERROR: {str(e)}", xbmc.LOGINFO)
-
-
-					self._kill_progress_dialog()
-					self.playback_successful = True
-					return
-					#try:
-					#	if self._user_cancelled_resolve() or monitor.abortRequested():
-					#		self._resolve_user_cancelled = True
-					#		self.cancel_all_playback = True
-					#		break
-					#	url = self._resolve_sources_wait(item)
-					#	if self._user_cancelled_resolve():
-					#		self._resolve_user_cancelled = True
-					#		self.cancel_all_playback = True
-					#		break
-					#	if self._resolve_user_cancelled or self.cancel_all_playback:
-					#		break
-					#	if url:
-					#		if self._user_cancelled_resolve():
-					#			self._resolve_user_cancelled = True
-					#			self.cancel_all_playback = True
-					#			break
-					#		resolve_percent = 0
-					#		self.progress_dialog.busy_spinner('false')
-					#		self.progress_dialog.update_resolver(percent=resolve_percent)
-					#		kodi_utils.sleep(200)
-					#		if self._user_cancelled_resolve():
-					#			self._resolve_user_cancelled = True
-					#			self.cancel_all_playback = True
-					#			break
-					#		kodi_utils.sleep(50)
-					#		if self._user_cancelled_resolve():
-					#			self._resolve_user_cancelled = True
-					#			self.cancel_all_playback = True
-					#			break
-					#		url = self._ensure_play_headers(url, item)
-					#		if self._user_cancelled_resolve():
-					#			self._resolve_user_cancelled = True
-					#			self.cancel_all_playback = True
-					#			break
-					#		player.run(url, self)
-					#	else: continue
-					#	if self.cancel_all_playback or self._resolve_user_cancelled:
-					#		break
-					#	if self.playback_successful: break
-					#except: pass
-				
-				#except: pass
-		#except:
-		#	self._kill_progress_dialog()
-		#else:
-		#	if self.cancel_all_playback or self._resolve_user_cancelled:
-		#		self._finish_resolve_cancel()
-		#	elif not self.playback_successful or not url:
-		#		kodi_utils.logger('Red Light', 'Resolve queue failed: success=%s url=%s dialog=%s' % (
-		#			self.playback_successful, bool(url), bool(self.progress_dialog)))
-		#		self.playback_failed_action()
-		#finally:
-		#	self._release_resolve_busy()
-		#	try: del monitor
-		#	except: pass
+					player = RedLightPlayer()
+					try:
+						if self._user_cancelled_resolve() or monitor.abortRequested():
+							self._resolve_user_cancelled = True
+							self.cancel_all_playback = True
+							break
+						url = self._resolve_sources_wait(item)
+						if self._user_cancelled_resolve():
+							self._resolve_user_cancelled = True
+							self.cancel_all_playback = True
+							break
+						if self._resolve_user_cancelled or self.cancel_all_playback:
+							break
+						if url:
+							if self._user_cancelled_resolve():
+								self._resolve_user_cancelled = True
+								self.cancel_all_playback = True
+								break
+							resolve_percent = 0
+							self.progress_dialog.busy_spinner('false')
+							self.progress_dialog.update_resolver(percent=resolve_percent)
+							kodi_utils.sleep(200)
+							if self._user_cancelled_resolve():
+								self._resolve_user_cancelled = True
+								self.cancel_all_playback = True
+								break
+							kodi_utils.sleep(50)
+							if self._user_cancelled_resolve():
+								self._resolve_user_cancelled = True
+								self.cancel_all_playback = True
+								break
+							url = self._ensure_play_headers(url, item)
+							if self._user_cancelled_resolve():
+								self._resolve_user_cancelled = True
+								self.cancel_all_playback = True
+								break
+							player.run(url, self)
+						else: continue
+						if self.cancel_all_playback or self._resolve_user_cancelled:
+							break
+						if self.playback_successful: break
+					except: pass
+				except: pass
+		except:
+			self._kill_progress_dialog()
+		else:
+			if self.cancel_all_playback or self._resolve_user_cancelled:
+				self._finish_resolve_cancel()
+			elif not self.playback_successful or not url:
+				kodi_utils.logger('Red Light', 'Resolve queue failed: success=%s url=%s dialog=%s' % (
+					self.playback_successful, bool(url), bool(self.progress_dialog)))
+				self.playback_failed_action()
+		finally:
+			self._release_resolve_busy()
+			try: del monitor
+			except: pass
 
 	def get_playback_percent(self):
-		xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
-		if self.media_type == 'movie': 
-			xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
-			percent = watched_status.get_progress_status_movie(watched_status.get_bookmarks_movie(), str(self.tmdb_id))
-		elif any((self.random, self.random_continual)): 
-			xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
-			return 0.0
-		else: 
-			xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
-			percent = watched_status.get_progress_status_episode(watched_status.get_bookmarks_episode(self.tmdb_id, self.season), self.episode)
-		if not percent: 
-			xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
-			return 0.0
+		if self.media_type == 'movie': percent = watched_status.get_progress_status_movie(watched_status.get_bookmarks_movie(), str(self.tmdb_id))
+		elif any((self.random, self.random_continual)): return 0.0
+		else: percent = watched_status.get_progress_status_episode(watched_status.get_bookmarks_episode(self.tmdb_id, self.season), self.episode)
+		if not percent: return 0.0
 		if self.cloud_prescrape_autoplay:
-			xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
 			if settings.auto_resume(self.media_type, True):
-				xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
 				return float(percent)
-			xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
-			return float(percent)
+			return 0.0
 		action = self.get_resume_status(percent)
-		if action == 'cancel': 
-			xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
-			return None
+		if action == 'cancel': return None
 		if action == 'start_over':
-			xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
 			watched_status.erase_bookmark(self.media_type, self.tmdb_id, self.season, self.episode)
 			return 0.0
-		xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
 		return float(percent)
 
 	def get_resume_status(self, percent):
-		xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
-		if settings.auto_resume(self.media_type, self.autoplay): 
-			xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
-			xbmc.log(str(percent), xbmc.LOGINFO)
-			return float(percent)
+		if settings.auto_resume(self.media_type, self.autoplay): return float(percent)
 		choice = self._make_resume_dialog(percent)
-		xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
 		if self._user_cancelled_resolve() or choice in (None, 'cancel'):
-			xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
 			return 'cancel'
 		if choice == 'start_over':
-			xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
 			return 'start_over'
-		xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
 		return float(percent)
 
 	def playback_failed_action(self):
@@ -2075,13 +1742,10 @@ class Sources():
 
 	def continue_resolve_check(self):
 		try:
-			if not self.background or self.autoscrape_nextep: 
-				return True
-			if self.autoplay_nextep: 
-				return self.autoplay_nextep_handler()
+			if not self.background or self.autoscrape_nextep: return True
+			if self.autoplay_nextep: return self.autoplay_nextep_handler()
 			return self.random_continual_handler()
-		except: 
-			return False
+		except: return False
 
 	def random_continual_handler(self):
 		kodi_utils.notification('[B]Next Up:[/B] %s S%02dE%02d' % (self.meta.get('title'), self.meta.get('season'), self.meta.get('episode')), 6500, self.meta.get('poster'))
@@ -2089,55 +1753,6 @@ class Sources():
 		while player.isPlayingVideo(): kodi_utils.sleep(100)
 		self._make_resolve_dialog()
 		return True
-
-	def _is_valid_playable_url(self, url, item=None):
-		if not url or not isinstance(url, str):
-			return None
-
-		u = url.lower()
-
-		# --- must be http(s) ---
-		if not (u.startswith('http://') or u.startswith('https://')):
-			return None
-
-		# --- obvious bad resolver output ---
-		bad_tokens = (
-			'error',
-			'invalid',
-			'unsupported',
-			'not available','infringing_file','{files} is missing','too_many_requests','unknown_resource',
-			'videostream'
-		)
-		if any(token in u for token in bad_tokens):
-			return None
-
-		# --- determine path (strip headers, query) ---
-		name = ''
-		try:
-			if item:
-				name = item.get('name', '') or item.get('display_name', '')
-		except:
-			pass
-
-		path = (url or '').split('|')[0].split('?')[0]
-		path_lower = (name or path).lower()
-
-		# --- valid video extensions (proxy for MIME correctness) ---
-		valid_exts = (
-			'.m2ts',
-			'.mts',
-			'.ts',
-			'.mkv',
-			'.mp4',
-			'.avi',
-			'.mov',
-			'.webm',
-		)
-
-		if not any(path_lower.endswith(ext) for ext in valid_exts):
-			return None
-
-		return url
 
 	def autoplay_nextep_handler(self):
 		if not self.nextep_settings: return False
@@ -2187,131 +1802,32 @@ class Sources():
 		self._make_resolve_dialog()
 		return True
 
-	def autoscrape_nextep_helper(self, results):
-		from modules.player import RedLightPlayer
-		player = RedLightPlayer()
-
-		#next_url = self.resolve_url(results)
-		next_url = None
-		for item in results:
-			#next_url = self.resolve_sources(item)
-			next_url = self._resolve_sources_wait(item)
-
-			if next_url:
-				next_url = self._ensure_play_headers(next_url, item)
-			if not self._is_valid_playable_url(next_url):
-				xbmc.log(f"INVALID URL - skipping: {str(next_url)}", xbmc.LOGINFO)
-				continue
-			else:
-				break
-
-
-			#if next_url:
-			#	break
-
-		if not next_url:
-			return
-
-		listitem = player.make_listing()
-
-		try:
-			sorttitle_b64 = make_sorttitle(self.meta)
-			listitem.getVideoInfoTag().setSortTitle(sorttitle_b64)
-		except:
-			pass
-
-		playlist = xbmc.PlayList(xbmc.PLAYLIST_VIDEO)
-
-		# prevent duplicates
-		for i in range(playlist.size()):
-			try:
-				try:
-					existing = playlist[i].getVideoInfoTag().getSortTitle()
-				except:
-					existing = None
-
-				if existing == sorttitle_b64:
-					return
-			except:
-				continue
-
-		xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
-		xbmc.log(str(next_url), xbmc.LOGINFO)
-		return playlist.add(next_url, listitem)
-
 	def autoscrape_nextep_handler(self):
-		player = xbmc.Player()
+		if settings.autoscrape_confirm():
+			if not self._make_still_watching_dialog('Autoscrape Next Episode of [B]%s[/B]?', heading='Autoscrape Next Episode?', right_align=True):
+				return
+		player = kodi_utils.kodi_player()
 		if player.isPlayingVideo():
 			results = self.get_sources()
-			if not results: return kodi_utils.notification(33092, 3000)
+			if not results:
+				return
 			else:
-				kodi_utils.notification('[B]Next Episode Ready:[/B] %s S%02dE%02d' % (self.meta.get('title'), self.meta.get('season'), self.meta.get('episode')), 6500, self.meta.get('poster'))
+				kodi_utils.notification('[B]Next Episode Ready:[/B] %s S%02dE%02d' \
+						% (self.meta.get('title'), self.meta.get('season'), self.meta.get('episode')), 6500, self.meta.get('poster'))
 				while player.isPlayingVideo(): kodi_utils.sleep(100)
-			#self.display_results(results)
-			#self.autoscrape_nextep_helper(results)
-
-			# DISABLED - playlist system handles this
-			# self.autoscrape_nextep_helper(results)
-			return
-
+			self.display_results(results)
 		else: return
-
-
-	#def autoscrape_nextep_handler(self):
-	#	if settings.autoscrape_confirm():
-	#		if not self._make_still_watching_dialog('Autoscrape Next Episode of [B]%s[/B]?', heading='Autoscrape Next Episode?', right_align=True):
-	#			return
-	#	player = kodi_utils.kodi_player()
-	#	if player.isPlayingVideo():
-	#		results = self.get_sources()
-	#		if not results:
-	#			return
-	#		else:
-	#			kodi_utils.notification('[B]Next Episode Ready:[/B] %s S%02dE%02d' \
-	#					% (self.meta.get('title'), self.meta.get('season'), self.meta.get('episode')), 6500, self.meta.get('poster'))
-	#			while player.isPlayingVideo(): kodi_utils.sleep(100)
-	#		self.display_results(results)
-	#	else: return
 
 	def debrid_importer(self, debrid_provider):
 		return manual_function_import(*self.debrids[debrid_provider])
 
-
-	def fix_debrid_link(self, url, item):
-		# ✅ FIX: handle RD /d/ links
-
-		if url and 'real-debrid.com/d/' in url:
-			xbmc.sleep(3000)
-			debrid_function = self.debrid_importer('Real-Debrid')
-			try:
-				# attempt to resolve again
-				url2 = debrid_function().unrestrict_link(url)
-				if url2 and 'real-debrid.com/d/' not in url2:
-					url = url2
-				else:
-					# fallback: try legacy unrestricted endpoint
-					xbmc.sleep(3000)
-					url2 = debrid_function().unrestrict_link(url)
-					return url2
-			except:
-				pass
-		return url
-
-
 	def resolve_sources(self, item, meta=None):
-		# ✅ HARD BYPASS FOR DIRECT LINKS
-		if item.get('direct_debrid_link') and item.get('url_dl'):
-			url = item['url_dl']
-			url = self.fix_debrid_link(url, item)
-			return url
-
 		if self._user_cancelled_resolve():
 			return None
 		if meta: self.meta = meta
 		url = None
 		scrape_provider = item.get('scrape_provider')
-		#try:
-		if 1==1:
+		try:
 			# Cloud scrapers set debrid=tb_cloud/pm_cloud/etc.; resolve those here, not via resolve_cached.
 			if scrape_provider in self.default_internal_scrapers:
 				if scrape_provider == 'aiostreams':
@@ -2332,10 +1848,11 @@ class Sources():
 				if cache_provider in ('Real-Debrid', 'Premiumize.me', 'AllDebrid', 'Offcloud', 'TorBox'):
 					url = self.resolve_cached(cache_provider, item['url'], item['hash'], title, season, episode, pack)
 			else: url = item['url']
-		#except: pass
+		except: pass
 		if self._user_cancelled_resolve():
 			return None
-		url = self.fix_debrid_link(url, item)
+		import modules.playlist as playlist_module
+		url = playlist_module.sources_def_resolve_sources_fix_debrid(self,url, item)
 		return url
 
 	def resolve_cached(self, debrid_provider, item_url, _hash, title, season, episode, pack):
@@ -2364,22 +1881,11 @@ class Sources():
 					else:
 						url = tb.unrestrict_link(item_id)
 					url = tb.coerce_play_url(url) or url
-				#elif any(i in scrape_provider for i in ('rd_', 'ad_', 'tb_')):
-				#	url = debrid_function().unrestrict_link(item_id)
-
-				elif scrape_provider == 'rd_cloud':
-					# ✅ Direct RD links should NEVER be re-resolved
-					if direct_debrid_link and url_dl:
-						url = url_dl
-					elif item_id and item_id.startswith('http'):
-						url = item_id
-					else:
-						url = debrid_function().unrestrict_link(item_id)
-
-				elif any(i in scrape_provider for i in ('ad_', 'tb_')):
-					url = debrid_function().unrestrict_link(item_id)
-
-
+#				elif any(i in scrape_provider for i in ('rd_', 'ad_', 'tb_')):
+#					url = debrid_function().unrestrict_link(item_id)
+				elif any(i in scrape_provider for i in ('rd_', 'ad_', 'tb_')):
+					import modules.playlist as playlist_module
+					url = playlist_module.sources_def_resolve_internal_fix_debrid(debrid_function, scrape_provider, direct_debrid_link, url_dl, item_id)
 				else:
 					if '_cloud' in scrape_provider: item_id = debrid_function().get_item_details(item_id)['link']
 					url = debrid_function().add_headers_to_url(item_id)

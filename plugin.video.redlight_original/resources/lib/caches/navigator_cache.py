@@ -153,15 +153,12 @@ class NavigatorCache:
 		return contents
 
 	def currently_used_list(self, list_name):
-		used_list = None
-		try:
-			used_list = self.get_memory_cache(list_name, 'edited') or self.get_memory_cache(list_name, 'default') \
+		try: used_list = self.get_memory_cache(list_name, 'edited') or self.get_memory_cache(list_name, 'default') \
 						or self.get_list(list_name, 'edited') or self.get_list(list_name, 'default')
-		except: pass
+		except: used_list = []
 		if not used_list:
-			try: self.rebuild_database()
-			except: pass
-			used_list = NavigatorCache.main_menus.get(list_name) or []
+			self.rebuild_database()
+			used_list = NavigatorCache.main_menus[list_name]
 		return used_list
 
 	def rebuild_database(self):

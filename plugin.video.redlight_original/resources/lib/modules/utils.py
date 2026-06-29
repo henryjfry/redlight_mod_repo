@@ -338,47 +338,32 @@ def unzip(zip_location, destination_location, destination_check, show_busy=True)
 	if show_busy: hide_busy_dialog()
 	return status
 
-def _prune_qr_cache(folder, keep=30, min_age_secs=86400):
-	'''Drop old QR PNGs on a cool path — never while auth dialogs may still reference them.'''
+def _prune_qr_cache(folder, keep=30):
 	try:
 		import glob
 		from os import path, remove
-		from time import time
-		now = time()
 		files = sorted(glob.glob(path.join(folder, 'qr_*.png')), key=path.getmtime, reverse=True)
-		for idx, stale in enumerate(files):
-			if idx < keep:
-				continue
-			if (now - path.getmtime(stale)) < min_age_secs:
-				continue
+		for stale in files[keep:]:
 			try: remove(stale)
 			except: pass
 	except: pass
 
 def make_qrcode(url):
-	if not url:
-		return
+	if url == None: return
 	import segno
 	from hashlib import sha1
 	from os import path
 	from time import time
-	from modules.kodi_utils import addon_profile, translate_path, path_exists, make_directories, logger
+	from modules.kodi_utils import addon_profile, translate_path
 	try:
-		profile = translate_path(addon_profile())
-		make_directories(profile)
+		profile = addon_profile()
 		qr_id = sha1(url.encode('utf-8')).hexdigest()[:12]
-		stamp = int(time() * 1000)
-		art_path = path.join(profile, 'qr_%s_%s.png' % (qr_id, stamp))
-		segno.make(url, micro=False).save(art_path, scale=20)
-		if not path_exists(art_path):
-			import os
-			if not os.path.exists(art_path):
-				logger('Red Light', 'make_qrcode: missing after save %s' % art_path)
-				return
-		return translate_path(art_path)
-	except Exception as e:
-		logger('Red Light', 'make_qrcode failed: %s' % e)
-		return
+		art_path = path.join(profile, 'qr_%s_%s.png' % (qr_id, int(time() * 1000)))
+		qrcode = segno.make(url, micro=False)
+		qrcode.save(art_path, scale=20)
+		_prune_qr_cache(profile)
+	except: return
+	return translate_path(art_path)
 
 def make_tinyurl(url):
 	if not url:

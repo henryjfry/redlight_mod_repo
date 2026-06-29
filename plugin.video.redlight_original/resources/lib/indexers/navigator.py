@@ -12,7 +12,7 @@ class Navigator:
 		self.category_name = self.params_get('name', 'Red Light')
 		self.list_name = self.params_get('action', 'RootList')
 		self.is_external = k.external()
-		self.make_listitem = lambda: k.make_listitem(False)
+		self.make_listitem = k.make_listitem
 		self.build_url = k.build_url
 		self.add_item = k.add_item
 		self.get_icon = k.get_icon
@@ -46,21 +46,15 @@ class Navigator:
 				except: pass
 		if self.params_get('full_list', 'false') == 'true': browse_list = nc.get_main_lists(self.list_name)[0]
 		else: browse_list = nc.currently_used_list(self.list_name)
-		if not browse_list:
-			browse_list = list(nc.main_menus.get(self.list_name, []))
 		results = sorted(list(_process()), key=lambda k: k[1])
-		if not results and browse_list:
-			k.logger('Red Light', 'menu build empty for %s (%s items expected)' % (self.list_name, len(browse_list)))
-		handle = int(sys.argv[1])
-		if results:
-			k.add_items(handle, [i[0] for i in results])
+		k.add_items(int(sys.argv[1]), [i[0] for i in results])
 		if not self.is_external:
 			if self.list_name == 'RootList':
 				folder_path = k.folder_path()
 				if folder_path: k.set_property('redlight.exit_params', k.sanitize_folder_url(folder_path))
 			else:
 				k.set_property('redlight.exit_params', k.build_folder_url({'mode': 'navigator.main', 'action': 'RootList'}))
-		self.end_directory(cache_to_disc=bool(results), skip_view_mode=(self.list_name == 'RootList'))
+		self.end_directory()
 
 	def discover(self):
 		self.add({'mode': 'navigator.discover_contents', 'media_type': 'movie'}, 'Movies', 'movies')
@@ -350,12 +344,8 @@ class Navigator:
 		self.end_directory()
 
 	def import_export(self):
-		self.add({'mode': 'settings_backup.import_settings', 'isFolder': 'false'}, 'Import Red Light Settings', 'settings')
-		self.add({'mode': 'settings_backup.export_settings', 'isFolder': 'false'}, 'Export Red Light Settings', 'settings')
-		self.add({'mode': 'local_backup.import_data', 'isFolder': 'false'}, 'Import Red Light Favorites & History', 'folder')
-		self.add({'mode': 'local_backup.export_data', 'isFolder': 'false'}, 'Export Red Light Favorites & History', 'folder')
-		self.add({'mode': 'kodi_favorites.import_favorites', 'isFolder': 'false'}, 'Import Kodi Favorites', 'favorites')
-		self.add({'mode': 'kodi_favorites.export_favorites', 'isFolder': 'false'}, 'Export Kodi Favorites', 'favorites')
+		self.add({'mode': 'local_backup.import_data', 'isFolder': 'false'}, 'Import Red Light Favorites & Progress', 'settings')
+		self.add({'mode': 'local_backup.export_data', 'isFolder': 'false'}, 'Export Red Light Favorites & Progress', 'settings')
 		self.end_directory()
 
 	def maintenance(self):
@@ -386,13 +376,19 @@ class Navigator:
 		self.end_directory()
 
 	def set_view_modes(self):
-		self.add({'mode': 'navigator.choose_view', 'view_type': 'view.main', 'content': 'files', 'name': 'menus'}, 'Set Menus', 'folder')
+		self.add({'mode': 'navigator.choose_view', 'view_type': 'view.main', 'content': '', 'name': 'menus'}, 'Set Menus', 'folder')
 		self.add({'mode': 'navigator.choose_view', 'view_type': 'view.movies', 'content': 'movies'}, 'Set Movies', 'movies')
 		self.add({'mode': 'navigator.choose_view', 'view_type': 'view.tvshows', 'content': 'tvshows'}, 'Set TV Shows', 'tv')
 		self.add({'mode': 'navigator.choose_view', 'view_type': 'view.seasons', 'content': 'seasons'}, 'Set Seasons', 'ontheair')
 		self.add({'mode': 'navigator.choose_view', 'view_type': 'view.episodes', 'content': 'episodes'}, 'Set Episodes', 'next_episodes')
 		self.add({'mode': 'navigator.choose_view', 'view_type': 'view.episodes_single', 'content': 'episodes', 'name': 'episode lists'}, 'Set Episode Lists', 'calender')
 		self.add({'mode': 'navigator.choose_view', 'view_type': 'view.premium', 'content': 'files', 'name': 'premium files'}, 'Set Premium Files', 'premium')
+		self.end_directory()
+
+	def update_utils(self):
+		self.add({'mode': 'updater.update_check', 'isFolder': 'false'}, 'Check For Updates', 'github')
+		self.add({'mode': 'updater.rollback_check', 'isFolder': 'false'}, 'Rollback to a Previous Version', 'github')
+		self.add({'mode': 'updater.get_changes', 'isFolder': 'false'}, 'Check Online Version Changelog', 'github')
 		self.end_directory()
 
 	def changelog_utils(self):
@@ -554,19 +550,16 @@ class Navigator:
 
 	def choose_view(self):
 		handle = int(sys.argv[1])
-		content = self.params.get('content', 'files')
-		view_type = self.params.get('view_type', 'view.main')
-		name = self.params.get('name') or content
+		content = self.params['content']
+		view_type, name = self.params['view_type'], self.params.get('name') or content
 		self.add({'mode': 'navigator.set_view', 'view_type': view_type, 'name': name, 'isFolder': 'false'}, 'Set view and then click here', 'settings')
 		k.set_content(handle, content)
 		k.end_directory(handle)
 		k.set_view_mode(view_type, content, False)
 
 	def set_view(self):
-		view_type = self.params.get('view_type', 'view.main')
-		label = (self.params.get('name') or view_type.replace('view.', '').replace('_', ' ')).upper()
-		set_setting(view_type, str(k.current_window_object().getFocusId()))
-		k.notification('%s: %s' % (label, k.get_infolabel('Container.Viewmode').upper()), time=500)
+		set_setting(self.params['view_type'], str(k.current_window_object().getFocusId()))
+		k.notification('%s: %s' % (self.params['name'].upper(), k.get_infolabel('Container.Viewmode').upper()), time=500)
 
 	def shortcut_folders(self):
 		folders = nc.get_shortcut_folders()
@@ -585,9 +578,6 @@ class Navigator:
 
 	def build_shortcut_folder_contents(self):
 		list_name = self.params_get('name')
-		if not list_name:
-			k.notification('Shortcut folder not found.', 2500)
-			return self.end_directory()
 		is_random = '[COLOR red][RANDOM][/COLOR]' in list_name
 		contents = nc.get_shortcut_folder_contents(list_name)
 		folder_icon = self.get_icon('folder')
@@ -644,6 +634,10 @@ class Navigator:
 		if not params: return
 		params = k.sanitize_folder_url(params)
 		k.container_refresh_input(params)
+		if any(x in params for x in ('build_movie_list', 'build_season_list', 'build_episode_list')):
+			if 'build_movie_list' in params: k.set_view_mode('view.movies', 'movies', False)
+			else: k.set_view_mode('view.tvshows', 'tvshows', False)
+		else: k.set_view_mode('view.main', '')
 
 	def _set_submenu_exit_params(self, menu_type=None):
 		if self.is_external: return
@@ -728,7 +722,7 @@ class Navigator:
 		except: icon = k.get_icon('folder')
 		folder_params = dict(url_params)
 		folder_params.pop('isFolder', None)
-		url = k.build_folder_url(folder_params) if isFolder else k.build_url(folder_params)
+		url = k.build_folder_url(folder_params)
 		listitem = self.make_listitem()
 		listitem.setLabel(list_name)
 		listitem.setArt({'icon': icon, 'poster': icon, 'thumb': icon, 'fanart': self.fanart, 'banner': icon, 'landscape': icon})
@@ -744,10 +738,9 @@ class Navigator:
 			listitem.addContextMenuItems(cm_items)
 		self.add_item(int(sys.argv[1]), url, listitem, isFolder)
 
-	def end_directory(self, cache_to_disc=True, update_listing=False, skip_view_mode=False):
+	def end_directory(self, cache_to_disc=True, update_listing=False):
 		handle = int(sys.argv[1])
-		k.set_content(handle, 'files')
+		k.set_content(handle, '')
 		k.set_category(handle, self.category_name)
 		k.end_directory(handle, updateListing=update_listing, cacheToDisc=cache_to_disc)
-		if not skip_view_mode:
-			k.set_view_mode('view.main', 'files')
+		k.set_view_mode('view.main', '')
