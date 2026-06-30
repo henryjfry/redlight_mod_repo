@@ -303,6 +303,9 @@ class RedLightMonitor(Monitor):
 		_start_daemon(lambda: SimklMonitor().run(self))
 		_start_daemon(lambda: MdblistMonitor().run(self))
 		_start_daemon(lambda: WidgetRefresher().run(self))
+		import modules.playlist as playlist_module
+		self.player_monitor = playlist_module.PlayerMonitor()
+		
 		try: AutoStart().run(self)
 		except Exception as e: kodi_utils.logger('AutoStart', str(e))
 
