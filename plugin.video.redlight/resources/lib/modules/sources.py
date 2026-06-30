@@ -185,8 +185,8 @@ class Sources():
 			self._nextep_alert_handled = True
 			params_get = self.params.get
 		self.background = params_get('background', 'false') == 'true'
-		#if not self.background and params_get('nextep_stash_play') != 'true' and self._playback_already_active():
-		#	return
+		if not self.background and params_get('nextep_stash_play') != 'true' and self._playback_already_active():
+			return
 		self.play_type = params_get('play_type', '')
 		if 'prescrape' in self.params:
 			self.prescrape = params_get('prescrape') == 'true'
@@ -224,8 +224,8 @@ class Sources():
 		self._playback_failed_notified = False
 		self.get_meta()
 		self.determine_scrapers_status()
-		#if not self.prescrape and not self._playback_skips_prescrape_override() and settings.prescrape_enabled(self.media_type, self.active_internal_scrapers):
-		#	self.prescrape = True
+		if not self.prescrape and not self._playback_skips_prescrape_override() and settings.prescrape_enabled(self.media_type, self.active_internal_scrapers):
+			self.prescrape = True
 		self.sleep_time, self.provider_sort_ranks, self.scraper_settings = 100, settings.provider_sort_ranks(), settings.scraping_settings()
 		self.include_prerelease_results = settings.include_prerelease_results()
 		self.limit_resolve = settings.limit_resolve()
@@ -236,21 +236,19 @@ class Sources():
 		if self.background and self.play_type in ('autoplay_nextep', 'autoscrape_nextep', 'random_continual'):
 			self._log_nextep_scrape_started()
 			self._prefetch_nextep_segment_data()
-		#if self.background and self.autoplay_nextep and self.nextep_settings and not getattr(self, '_nextep_alert_handled', False):
-		#	if not self.still_watching_check():
-		#		kodi_utils.notification('Cancel Autoplay', icon=self.meta.get('poster'))
-		#		return
-		#if getattr(self, '_nextep_stash_results', None):
-		#	try:
-		#		kodi_utils.logger('Red Light', 'Autoplay next episode play: starting resolve for %s S%02dE%02d' % (
-		#			self.meta.get('title', ''), self.season, self.episode))
-		#	except:
-		#		pass
-		#	return self.play_file(self._nextep_stash_results)
-		#if self.autoscrape: self.autoscrape_nextep_handler()
-		#else: return self.get_sources()
-		import modules.playlist as playlist_module
-		return playlist_module.sources_def_playback_prep_return(self, self.params)
+		if self.background and self.autoplay_nextep and self.nextep_settings and not getattr(self, '_nextep_alert_handled', False):
+			if not self.still_watching_check():
+				kodi_utils.notification('Cancel Autoplay', icon=self.meta.get('poster'))
+				return
+		if getattr(self, '_nextep_stash_results', None):
+			try:
+				kodi_utils.logger('Red Light', 'Autoplay next episode play: starting resolve for %s S%02dE%02d' % (
+					self.meta.get('title', ''), self.season, self.episode))
+			except:
+				pass
+			return self.play_file(self._nextep_stash_results)
+		if self.autoscrape: self.autoscrape_nextep_handler()
+		else: return self.get_sources()
 
 	def check_episode_group(self):
 		try:
@@ -1393,15 +1391,11 @@ class Sources():
 		self.progress_dialog.enable_resolver()
 
 	def _make_resume_dialog(self, percent):
-		import modules.playlist as playlist_module
-		return playlist_module.make_resume_choice()
 		if not self.progress_dialog: self._make_progress_dialog()
 		self.progress_dialog.enable_resume(percent)
 		return self.progress_dialog.resume_choice
 
 	def _make_nextep_dialog(self, default_action='cancel'):
-		import modules.playlist as playlist_module
-		return playlist_module.NEW_nextep_dialog(self, default_action)
 		try: action = open_window(('windows.playback_notifications', 'NextEpisode'), 'playback_notifications.xml', meta=self.meta, default_action=default_action)
 		except: action = 'cancel'
 		return action
@@ -1671,8 +1665,6 @@ class Sources():
 		return player
 
 	def play_file(self, results, source={}):
-		import modules.playlist as playlist_module
-		return playlist_module.playlist_play_file(self, results, source)
 		playable_results = [i for i in results if 'Uncached' not in i.get('cache_provider', '')]
 		if not playable_results and not source:
 			return self._no_results()
@@ -2167,8 +2159,6 @@ class Sources():
 		except: pass
 		if self._user_cancelled_resolve():
 			return None
-		import modules.playlist as playlist_module
-		url = playlist_module.sources_def_resolve_sources_fix_debrid(self,url, item)
 		return url
 
 	def resolve_cached(self, debrid_provider, item_url, _hash, title, season, episode, pack):
@@ -2198,8 +2188,7 @@ class Sources():
 						url = tb.unrestrict_link(item_id)
 					url = tb.coerce_play_url(url) or url
 				elif any(i in scrape_provider for i in ('rd_', 'ad_', 'tb_')):
-					#url = debrid_function().unrestrict_link(item_id)
-					url = playlist_module.sources_def_resolve_internal_fix_debrid(debrid_function, scrape_provider, direct_debrid_link, url_dl, item_id)
+					url = debrid_function().unrestrict_link(item_id)
 				else:
 					if '_cloud' in scrape_provider: item_id = debrid_function().get_item_details(item_id)['link']
 					url = debrid_function().add_headers_to_url(item_id)
