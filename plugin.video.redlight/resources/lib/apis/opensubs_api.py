@@ -205,9 +205,8 @@ def revoke_access():
 		refresh_settings_manager_properties()
 	except: pass
 	try:
-		from modules.settings import refresh_playback_subs_source, refresh_alert_timing_settings
+		from modules.settings import refresh_playback_subs_source
 		refresh_playback_subs_source()
-		refresh_alert_timing_settings()
 	except: pass
 	return ku.ok_dialog(heading='OpenSubtitles', text='OpenSubtitles username, password, and saved login cleared.')
 

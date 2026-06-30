@@ -48,19 +48,8 @@ def routing(sys):
 		from indexers import easynews
 		return exec('easynews.%s(params)' % mode.split('.')[1])
 	elif 'playback.' in mode:
-#		from modules.kodi_utils import player_check
-#		return player_check(mode, params)
-		if mode == 'playback.media':
-			from modules.sources import Sources
-			from modules.sources import PROP_SOURCES_BUSY
-			import xbmc, xbmcgui
-			xbmcgui.Window(10000).clearProperty(PROP_SOURCES_BUSY)
-			xbmcgui.Window(10000).clearProperty('fenlight.onPlayBackStarted')
-			playlist = xbmc.PlayList(xbmc.PLAYLIST_VIDEO)
-			playlist.clear()
-			params['prescrape'] = 'true'
-			
-			return Sources().playback_prep(params)
+		from modules.kodi_utils import player_check
+		return player_check(mode, params)
 	elif 'choice' in mode:
 		from indexers import dialogs
 		return exec('dialogs.%s(params)' % mode)
