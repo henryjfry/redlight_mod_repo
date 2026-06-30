@@ -19,11 +19,16 @@ class source:
 			filter_title = filter_by_name(self.scrape_provider)
 			self.media_type, title, self.tmdb_id = info.get('media_type'), info.get('title'), info.get('tmdb_id')
 			self.year, self.season, self.episode = int(info.get('year')), info.get('season'), info.get('episode')
-			self.folder_query = source_utils.clean_title(normalize(title))
+			self.folder_query = source_utils.clean_title(normalize(title))   ## PATCH
+			#self._scrape_downloads()   ## PATCH
+			#self._scrape_cloud()   ## PATCH
+			#if not self.scrape_results: return source_utils.internal_results(self.scrape_provider, self.sources)    ## PATCH
+			aliases = source_utils.get_aliases_titles(info.get('aliases', []))
+			import modules.playlist as playlist_module
+			self.folder_queries = playlist_module.rd_cloud_def_results_alias_fix(title, aliases)
 			self._scrape_downloads()
 			self._scrape_cloud()
-			if not self.scrape_results: return source_utils.internal_results(self.scrape_provider, self.sources)
-			aliases = source_utils.get_aliases_titles(info.get('aliases', []))
+			if not self.scrape_results: return source_utils.internal_results(self.scrape_provider, self.sources)  ## PATCH
 			def _process():
 				for item in self.scrape_results:
 					try:
@@ -59,11 +64,12 @@ class source:
 			year_query_list = self._year_query_list()
 			for item in my_cloud_files:
 				normalized = normalize(item['filename'])
-				folder_name = source_utils.clean_title(normalized)
+				folder_name = source_utils.clean_title(normalized)   ## 2PATCH
 				if not folder_name: results_append(item['id'])
-				elif not self.folder_query in folder_name: continue
+				#elif not self.folder_query in folder_name: continue    ## 2PATCH
+				elif not any(q in folder_name for q in self.folder_queries): continue
 				else:
-					if self.media_type == 'movie' and not any(x in normalized for x in year_query_list): continue
+					if self.media_type == 'movie' and not any(x in normalized for x in year_query_list): continue  ## 2PATCH
 					results_append(item['id'])
 			if not self.folder_results: return self.sources
 			threads = []
@@ -97,13 +103,14 @@ class source:
 			my_downloads = [i for i in my_downloads if i['download'].lower().endswith(tuple(self.extensions))]
 			scrape_results_append = self.scrape_results.append
 			year_query_list = self._year_query_list()
-			for item in my_downloads:
+			for item in my_downloads:  ## 1PATCH
 				normalized = normalize(item['filename'])
 				folder_name = source_utils.clean_title(normalized)
-				if not self.folder_query in folder_name: continue
+				#if not self.folder_query in folder_name: continue ## 1PATCH
+				if not any(q in folder_name for q in self.folder_queries): continue
 				if self.media_type == 'movie':
 					if not any(x in normalized for x in year_query_list): continue
-				elif not source_utils.seas_ep_filter(self.season, self.episode, normalized): continue
+				elif not source_utils.seas_ep_filter(self.season, self.episode, normalized): continue  ## 1PATCH
 				item = self.make_downloads_item(item)
 				if item['path'].replace('/', '').lower() not in [d['path'].replace('/', '').lower() for d in self.scrape_results]: scrape_results_append(item)
 		except: pass

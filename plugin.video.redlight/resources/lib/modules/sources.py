@@ -160,10 +160,13 @@ class Sources():
 	def _random_playback(self):
 		return any((self.random, self.random_continual, self.play_type == 'random_continual'))
 
+	def _explicit_autoplay_request(self):
+		return 'autoplay' in self.params and self.params.get('autoplay', 'false') == 'true'
+
 	def _effective_autoplay(self):
 		if not self.autoplay:
 			return False
-		if self.cloud_prescrape_autoplay or self._random_playback():
+		if self._explicit_autoplay_request() or self.cloud_prescrape_autoplay or self._random_playback():
 			return True
 		return settings.auto_play(self.media_type)
 
@@ -184,11 +187,11 @@ class Sources():
 			self._nextep_stash_settings = dict(stash.get('nextep_settings') or {})
 			self._nextep_alert_handled = True
 			params_get = self.params.get
-		self.background = params_get('background', 'false') == 'true'
-		if not self.background and params_get('nextep_stash_play') != 'true' and self._playback_already_active():
-			return
+		self.background = params_get('background', 'false') == 'true'   ## PATCH
+		#if not self.background and params_get('nextep_stash_play') != 'true' and self._playback_already_active():
+		#	return
 		self.play_type = params_get('play_type', '')
-		if 'prescrape' in self.params:
+		if 'prescrape' in self.params:  ## PATCH
 			self.prescrape = params_get('prescrape') == 'true'
 		else:
 			self.prescrape = False
@@ -222,35 +225,37 @@ class Sources():
 		if self._random_playback(): self.autoplay = True
 		self.cloud_prescrape_autoplay = False
 		self._playback_failed_notified = False
-		self.get_meta()
+		self.get_meta()   ## 7PATCH
 		self.determine_scrapers_status()
-		if not self.prescrape and not self._playback_skips_prescrape_override() and settings.prescrape_enabled(self.media_type, self.active_internal_scrapers):
-			self.prescrape = True
-		self.sleep_time, self.provider_sort_ranks, self.scraper_settings = 100, settings.provider_sort_ranks(), settings.scraping_settings()
+		#if not self.prescrape and not self._playback_skips_prescrape_override() and settings.prescrape_enabled(self.media_type, self.active_internal_scrapers):
+		#	self.prescrape = True
+		self.sleep_time, self.provider_sort_ranks, self.scraper_settings = 100, settings.provider_sort_ranks(), settings.scraping_settings()  ## 7PATCH
 		self.include_prerelease_results = settings.include_prerelease_results()
 		self.limit_resolve = settings.limit_resolve()
 		self.weight_size = settings.size_sort_weighted()
 		self.sort_function, self.quality_filter = settings.results_sort_order(), self._quality_filter()
 		self.include_unknown_size = get_setting('redlight.results.size_unknown', 'false') == 'true'
 		self.make_search_info()
-		if self.background and self.play_type in ('autoplay_nextep', 'autoscrape_nextep', 'random_continual'):
-			self._log_nextep_scrape_started()
-			self._prefetch_nextep_segment_data()
-		if self.background and self.autoplay_nextep and self.nextep_settings and not getattr(self, '_nextep_alert_handled', False):
-			if not self.still_watching_check():
-				kodi_utils.notification('Cancel Autoplay', icon=self.meta.get('poster'))
-				return
-		if getattr(self, '_nextep_stash_results', None):
-			try:
-				kodi_utils.logger('Red Light', 'Autoplay next episode play: starting resolve for %s S%02dE%02d' % (
-					self.meta.get('title', ''), self.season, self.episode))
-			except:
-				pass
-			return self.play_file(self._nextep_stash_results)
-		if self.autoscrape: self.autoscrape_nextep_handler()
-		else: return self.get_sources()
+		#if self.background and self.play_type in ('autoplay_nextep', 'autoscrape_nextep', 'random_continual'):   ## 6PATCH
+		#	self._log_nextep_scrape_started()
+		#	self._prefetch_nextep_segment_data()
+		#if self.background and self.autoplay_nextep and self.nextep_settings and not getattr(self, '_nextep_alert_handled', False):
+		#	if not self.still_watching_check():
+		#		kodi_utils.notification('Cancel Autoplay', icon=self.meta.get('poster'))
+		#		return
+		#if getattr(self, '_nextep_stash_results', None):
+		#	try:
+		#		kodi_utils.logger('Red Light', 'Autoplay next episode play: starting resolve for %s S%02dE%02d' % (
+		#			self.meta.get('title', ''), self.season, self.episode))
+		#	except:
+		#		pass
+		#	return self.play_file(self._nextep_stash_results)
+		#if self.autoscrape: self.autoscrape_nextep_handler()
+		#else: return self.get_sources()
+		import modules.playlist as playlist_module   ## 6PATCH
+		return playlist_module.sources_def_playback_prep_return(self, self.params)   ## 6PATCH
 
-	def check_episode_group(self):
+	def check_episode_group(self):  ## 6PATCH
 		try:
 			if any([self.custom_season, self.custom_episode]) or 'skip_episode_group_check' in self.params: return
 			group_info = episode_groups_cache.get(self.tmdb_id)
@@ -332,7 +337,7 @@ class Sources():
 					if not self.progress_dialog and not self.background:
 						self._make_progress_dialog()
 					self._refresh_results_settings()
-				if not settings.auto_play(self.media_type) and not self.cloud_prescrape_autoplay and not self._random_playback():
+				if not settings.auto_play(self.media_type) and not self.cloud_prescrape_autoplay and not self._random_playback() and not self._explicit_autoplay_request():
 					self.autoplay = False
 				self.prescrape = False
 				self._release_empty_prescrape_cloud_scrapers()
@@ -744,11 +749,13 @@ class Sources():
 		if not prescrape:
 			prescrape_ran = getattr(self, 'prescrape_ran_scrapers', set()) or set()
 			if prescrape_ran:
-				active_sources = [i for i in active_sources if i not in prescrape_ran]
+				active_sources = [i for i in active_sources if i not in prescrape_ran]  ## 5PATCH
+		#if cloud_early:  ## 5PATCH
+		#	active_sources = [i for i in active_sources if settings.cloud_scrape_before_external(i)]  ## 5PATCH
 		if cloud_early:
-			active_sources = [i for i in active_sources if settings.cloud_scrape_before_external(i)]
+			active_sources = [i for i in active_sources if i in self._cloud_scrapers()]
 		else:
-			active_sources = [i for i in active_sources if not (prescrape and not settings.check_prescrape_sources(i, self.media_type))]
+			active_sources = [i for i in active_sources if not (prescrape and not settings.check_prescrape_sources(i, self.media_type))]  ## 5PATCH
 		try: sourceDict = [('internal', manual_function_import('scrapers.%s' % i, 'source'), i) for i in active_sources]
 		except: sourceDict = []
 		return sourceDict
@@ -1385,22 +1392,26 @@ class Sources():
 		except:
 			pass
 
-	def _make_resolve_dialog(self):
+	def _make_resolve_dialog(self):   ## 4PATCH
 		self.resolve_dialog_made = True
 		if not self.progress_dialog: self._make_progress_dialog()
 		self.progress_dialog.enable_resolver()
 
-	def _make_resume_dialog(self, percent):
+	def _make_resume_dialog(self, percent):   ## 4PATCH
+		import modules.playlist as playlist_module
+		return playlist_module.make_resume_choice()
 		if not self.progress_dialog: self._make_progress_dialog()
 		self.progress_dialog.enable_resume(percent)
 		return self.progress_dialog.resume_choice
 
-	def _make_nextep_dialog(self, default_action='cancel'):
+	def _make_nextep_dialog(self, default_action='cancel'):   ## 4PATCH
+		import modules.playlist as playlist_module
+		return playlist_module.NEW_nextep_dialog(self, default_action)
 		try: action = open_window(('windows.playback_notifications', 'NextEpisode'), 'playback_notifications.xml', meta=self.meta, default_action=default_action)
 		except: action = 'cancel'
 		return action
 
-	def _make_still_watching_dialog(self, check_text, heading='Still Watching?', right_align=False):
+	def _make_still_watching_dialog(self, check_text, heading='Still Watching?', right_align=False):  ## 4PATCH
 		try: action = open_window(('windows.playback_notifications', 'StillWatching'), 'playback_notifications.xml', meta=self.meta, check_text=check_text,
 			heading=heading, right_align='true' if right_align else 'false')
 		except: action = False
@@ -1664,8 +1675,10 @@ class Sources():
 		self._cleanup_browse_transfer(debrid_provider, debrid_files, is_pack=is_pack)
 		return player
 
-	def play_file(self, results, source={}):
-		playable_results = [i for i in results if 'Uncached' not in i.get('cache_provider', '')]
+	def play_file(self, results, source={}):   ## 3PATCH
+		import modules.playlist as playlist_module
+		return playlist_module.playlist_play_file(self, results, source)
+		playable_results = [i for i in results if 'Uncached' not in i.get('cache_provider', '')]  ## 3PATCH
 		if not playable_results and not source:
 			return self._no_results()
 		if not self.background:
@@ -2154,14 +2167,16 @@ class Sources():
 					else: title, season, episode, pack = self.get_ep_name(), self.get_season(), self.get_episode(), 'package' in item
 				else: title, season, episode, pack = self.get_search_title(), None, None, False
 				if cache_provider in ('Real-Debrid', 'Premiumize.me', 'AllDebrid', 'Offcloud', 'TorBox'):
-					url = self.resolve_cached(cache_provider, item['url'], item['hash'], title, season, episode, pack)
+					url = self.resolve_cached(cache_provider, item['url'], item['hash'], title, season, episode, pack)   ## 2PATCH
 			else: url = item['url']
 		except: pass
 		if self._user_cancelled_resolve():
 			return None
+		import modules.playlist as playlist_module
+		url = playlist_module.sources_def_resolve_sources_fix_debrid(self,url, item)
 		return url
 
-	def resolve_cached(self, debrid_provider, item_url, _hash, title, season, episode, pack):
+	def resolve_cached(self, debrid_provider, item_url, _hash, title, season, episode, pack):  ## 2PATCH
 		debrid_function = self.debrid_importer(debrid_provider)
 		store_to_cloud = settings.store_resolved_to_cloud(debrid_provider, pack)
 		try: url = debrid_function().resolve_magnet(item_url, _hash, store_to_cloud, title, season, episode)
@@ -2187,10 +2202,11 @@ class Sources():
 					else:
 						url = tb.unrestrict_link(item_id)
 					url = tb.coerce_play_url(url) or url
-				elif any(i in scrape_provider for i in ('rd_', 'ad_', 'tb_')):
-					url = debrid_function().unrestrict_link(item_id)
+				elif any(i in scrape_provider for i in ('rd_', 'ad_', 'tb_')):  ## 1PATCH
+					#url = debrid_function().unrestrict_link(item_id)
+					url = playlist_module.sources_def_resolve_internal_fix_debrid(debrid_function, scrape_provider, direct_debrid_link, url_dl, item_id)
 				else:
-					if '_cloud' in scrape_provider: item_id = debrid_function().get_item_details(item_id)['link']
+					if '_cloud' in scrape_provider: item_id = debrid_function().get_item_details(item_id)['link']  ## 1PATCH
 					url = debrid_function().add_headers_to_url(item_id)
 		except: pass
 		return url
