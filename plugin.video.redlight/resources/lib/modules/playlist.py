@@ -41,6 +41,7 @@ PROP_NEXTEP_SCRAPE_KEY = 'redlight.nextep_scrape_key'
 episode_status_dict = {
 'season_premiere': 'b30385b5',
 'mid_season_premiere': 'b385b503',
+'series_premiere': 'b30385b5',
 'series_finale': 'b38503b5',
 'season_finale': 'b3b50385',
 'mid_season_finale': 'b3b58503',
@@ -766,13 +767,21 @@ def playlist_play_file(sources_obj, results, source=None):
 			sources_obj.playing_filename = item['name']
 			sources_obj.playing_item = item
 
-			#url = sources_obj._resolve_sources_wait(item)
-			url = safe_resolve(sources_obj, item)
+			url = sources_obj._resolve_sources_wait(item)
+			#url = safe_resolve(sources_obj, item)
+			xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
+			xbmc.log(str(item), level=xbmc.LOGINFO)
 
 			if url:
+				xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
+				xbmc.log(str(url), level=xbmc.LOGINFO)
 				url = sources_obj._ensure_play_headers(url, item)
+				xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
+				xbmc.log(str(url), level=xbmc.LOGINFO)
 
 			url = is_valid_playable_url(url, item)
+			xbmc.log(str(str('Line ')+str(getframeinfo(currentframe()).lineno)+'___'+str(getframeinfo(currentframe()).filename)), level=xbmc.LOGINFO)
+			xbmc.log(str(url), level=xbmc.LOGINFO)
 			if not url:
 				xbmc.log(f"INVALID URL - skipping: {str(url)}", xbmc.LOGINFO)
 				continue
@@ -952,7 +961,7 @@ def _reset_state(player_obj):
 	player_obj.nextep_info_gathered = False
 	player_obj.media_marked = False
 	player_obj.start_prep = None
-
+	player_obj.maybe_refresh_nextep = False
 	try:
 		player_obj.info_next_ep()
 	except:
@@ -1245,8 +1254,12 @@ def monitor_playlist(player_obj, monitor_id=None):
 
 		player_obj._simkl_scrobble_start()
 		if st.auto_enable_subs() and not st.submaker_enabled(): player_obj.showSubtitles(True)
+		player_obj.showSubtitles(False)
 
 		player_obj._max_progress = 0.0
+		player_obj.maybe_refresh_nextep = False
+		player_obj._intro_skip_fetch_started = False
+		player_obj.subs_searched = False
 		while not player_obj.stop_file:
 			xbmc.sleep(100)
 
@@ -1344,6 +1357,18 @@ def monitor_playlist(player_obj, monitor_id=None):
 						return
 					check_ep_flag = True
 
+				player_obj._simkl_scrobble_start()#
+				player_obj._maybe_start_subtitle_alert_fetch()#
+				player_obj._maybe_start_introdb_alert_fetch()#
+				if st.auto_enable_subs() and st.subtitles_source() == '0':#
+					try:#
+						from indexers.subtitles import enable_local_subtitles#
+						poster = player_obj.meta.get('poster') if getattr(player_obj, 'meta', None) else None#
+						enable_local_subtitles(player_obj, poster=poster or ku.get_icon('box_office'), notify=False)#
+					except:#
+						player_obj.showSubtitles(True)#
+				player_obj.showSubtitles(False)#
+
 
 			# ✅ 2. PLAYBACK TIMING ENGINE
 			try:
@@ -1370,6 +1395,18 @@ def monitor_playlist(player_obj, monitor_id=None):
 				xbmc.sleep(500)
 				continue
 
+			if not getattr(player_obj, '_intro_skip_fetch_started', False):#
+				player_obj._intro_skip_fetch_started = True#
+				player_obj._start_intro_skip_fetch()#
+			player_obj._maybe_apply_intro_skip()
+
+			if player_obj.subs_searched == False: 
+				player_obj.subs_searched = True
+				player_obj.run_subtitles()
+				xbmc.sleep(2000)
+				player_obj.showSubtitles(True)
+				player_obj.showSubtitles(False)
+
 			# ✅ 3. DETECT TRACK CHANGE VIA PLAYLIST INDICES (FAST & NON-BLOCKING)
 			try:
 				playlist = xbmc.PlayList(xbmc.PLAYLIST_VIDEO)
@@ -1385,7 +1422,7 @@ def monitor_playlist(player_obj, monitor_id=None):
 				player_obj._nextep_dialog_shown = False
 				player_obj._dialog_locked = False
 				check_ep_flag = False
-				_reset_state(player_obj)
+				#_reset_state(player_obj)
 				if not player_obj.media_type == 'movie':
 					current_ep = get_current_episode_from_player(player_obj)
 					cur_season, cur_episode = current_ep
@@ -1473,6 +1510,55 @@ def monitor_playlist(player_obj, monitor_id=None):
 			#		xbmc.log("PLAYLIST: Rendering playback transition interface overlay", xbmc.LOGINFO)
 			#		player_obj.sources_object._make_nextep_dialog(default_action='play')
 
+			"""
+			self._simkl_scrobble_start()#
+			self._maybe_start_subtitle_alert_fetch()#
+			self._maybe_start_introdb_alert_fetch()#
+			self._intro_skip_fetch_started = False#
+			if st.auto_enable_subs() and st.subtitles_source() == '0':#
+				try:#
+					from indexers.subtitles import enable_local_subtitles#
+					poster = self.meta.get('poster') if getattr(self, 'meta', None) else None#
+					enable_local_subtitles(self, poster=poster or ku.get_icon('box_office'))#
+				except:#
+					self.showSubtitles(True)#
+			while self.isPlayingVideo():
+
+					if not getattr(self, '_intro_skip_fetch_started', False):#
+						self._intro_skip_fetch_started = True#
+						self._start_intro_skip_fetch()#
+					self._maybe_apply_intro_skip()#
+					self.current_point = round(float(self.curr_time/self.total_time * 100), 1)
+
+					elif self.current_point >= 90:#
+						if not self.media_marked: self.media_watched_marker()#
+					if self.media_type == 'episode':
+
+								self._maybe_refresh_nextep_subtitle_timing()#
+								self._maybe_refresh_nextep_chapter_timing()#
+								self._maybe_refresh_nextep_introdb_timing()#
+
+					elif show_stinger and not self.movie_stingers_run: #
+						final_chapter = self._stinger_trigger_point(stinger_alert_timing, stingers_percentage_fallback)#
+						if self.current_point >= final_chapter: self.run_movie_stingers()#
+				except: pass
+				if not self.subs_searched: self.run_subtitles()#
+
+				ku.clear_property(PROP_NEXTEP_PREP_SCHEDULED)#
+			if not self.media_marked: self.media_watched_marker()#
+			self.clear_playback_properties(clear_navigation=False)#
+		except:#
+			ku.hide_busy_dialog()#
+			self.sources_object.playback_successful = False#
+			self.sources_object.cancel_all_playback = True#
+			return self.kill_dialog()#
+			"""
+
+			if player_obj.media_type == 'episode' and progress > 90 and player_obj._next_added == True and player_obj.maybe_refresh_nextep == False:
+				player_obj._maybe_refresh_nextep_subtitle_timing()
+				player_obj._maybe_refresh_nextep_chapter_timing()
+				player_obj._maybe_refresh_nextep_introdb_timing()
+				player_obj.maybe_refresh_nextep = True
 			if ((progress >= 97 and remaining <= 60) or remaining <= 30):
 				if player_obj.media_marked != True:
 					player_obj._max_progress = progress
