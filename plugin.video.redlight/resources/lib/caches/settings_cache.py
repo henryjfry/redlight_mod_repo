@@ -355,6 +355,10 @@ def _apply_settings_properties_from_db():
 		from apis.aiostreams_api import refresh_settings_properties
 		refresh_settings_properties()
 	except: pass
+	try:
+		from modules.settings import refresh_external_scraper_properties
+		refresh_external_scraper_properties()
+	except: pass
 	kodi_utils.set_property(_SETTINGS_PROPERTIES_LOADED, 'true')
 	settings_cache.clear_db_cache()
 
@@ -381,9 +385,10 @@ def refresh_settings_manager_properties():
 	settings_cache.clear_db_cache()
 	_apply_settings_properties_from_db()
 	try:
-		from modules.settings import refresh_playback_subs_source, refresh_alert_timing_settings
+		from modules.settings import refresh_playback_subs_source, refresh_alert_timing_settings, refresh_external_scraper_properties
 		refresh_playback_subs_source()
 		refresh_alert_timing_settings()
+		refresh_external_scraper_properties()
 	except: pass
 
 def bootstrap_settings_properties(force=False):
@@ -553,9 +558,10 @@ def sync_settings(params={}):
 		currentsettings['migration.cache_check_pm_oc_tb_v129e'] = 'true'
 		if load_properties: settings_cache.set_memory_cache('migration.cache_check_pm_oc_tb_v129e', 'true')
 	if currentsettings:
-		from modules.settings import migrate_simkl_context_menu_for_upgrade, migrate_mdblist_context_menu_for_upgrade, migrate_cm_manager_order_for_upgrade
+		from modules.settings import migrate_simkl_context_menu_for_upgrade, migrate_mdblist_context_menu_for_upgrade, migrate_cm_manager_order_for_upgrade, migrate_external_scraper_context_menu_for_upgrade
 		if migrate_simkl_context_menu_for_upgrade(had_existing_settings): migrated = True
 		if migrate_mdblist_context_menu_for_upgrade(had_existing_settings): migrated = True
+		if migrate_external_scraper_context_menu_for_upgrade(had_existing_settings): migrated = True
 		if migrate_cm_manager_order_for_upgrade(): migrated = True
 		if currentsettings.get('migration.my_content_nav_mode_v136') != 'true':
 			try:
@@ -594,6 +600,10 @@ def sync_settings(params={}):
 		migrated = True
 		if _new_settings_affect_widgets(insert_list):
 			widgets_migrated = True
+	if had_existing_settings:
+		from modules.settings import migrate_external_scraper_slots_for_upgrade, migrate_external_scraper_run_mode_for_upgrade
+		if migrate_external_scraper_slots_for_upgrade(had_existing_settings): migrated = True
+		if migrate_external_scraper_run_mode_for_upgrade(had_existing_settings): migrated = True
 	if migrated and had_existing_settings:
 		kodi_utils.set_property(_SETTINGS_DB_MIGRATED, 'true')
 	if widgets_migrated and had_existing_settings:
@@ -624,6 +634,11 @@ def set_boolean(params):
 	boolean_dict = {'true': 'false', 'false': 'true'}
 	setting = params['setting_id']
 	set_setting(setting, boolean_dict[get_setting('redlight.%s' % setting)])
+	if setting.startswith('external_scraper.slot') and setting.endswith('.enabled'):
+		try:
+			from modules.settings import refresh_external_scraper_properties
+			refresh_external_scraper_properties()
+		except: pass
 
 def set_string(params):
 	setting_id = params['setting_id']
@@ -706,6 +721,20 @@ def set_from_list(params):
 	new_value = kodi_utils.select_dialog(settings_list, **{'items': json.dumps([{'line1': item[0]} for item in settings_list]), 'narrow_window': 'true'})
 	if not new_value: return
 	setting_value = new_value[1]
+	if setting_id == 'external_scraper.run_mode' and setting_value == '0':
+		current = get_setting('redlight.external_scraper.run_mode', '1')
+		if current == '1':
+			if not kodi_utils.confirm_dialog(
+				heading='Search Mode',
+				text=('Many indexers used by external scrapers are non-profit community resources maintained by volunteers.[CR][CR]'
+					'[B]Parallel (All Enabled Slots)[/B] runs every enabled scraper module at the same time. If the same indexers are enabled on each module, that increases load on those indexers.[CR][CR]'
+					'Please use external scrapers responsibly. [B]Series (Fallback by Slot Order)[/B] runs one slot at a time and is gentler on shared indexers.'),
+				ok_label='Switch to Parallel',
+				cancel_label='Keep Series',
+				default_control=11,
+				scroll=True
+			):
+				return
 	prev_value = get_setting('redlight.%s' % setting_id) if setting_id == 'watched_indicators' else None
 	set_setting(setting_id, setting_value)
 	if setting_id == 'watched_indicators' and setting_value == '3' and str(prev_value) != '3':
@@ -780,6 +809,7 @@ def default_settings():
 {'setting_id': 'simkl.refresh_widgets', 'setting_type': 'boolean', 'setting_default': 'true'},
 {'setting_id': 'simkl.cm_menu_migrated', 'setting_type': 'boolean', 'setting_default': 'false'},
 {'setting_id': 'mdblist.cm_menu_migrated', 'setting_type': 'boolean', 'setting_default': 'false'},
+{'setting_id': 'external_scraper.cm_menu_migrated', 'setting_type': 'boolean', 'setting_default': 'false'},
 {'setting_id': 'cm_manager_order_migrated', 'setting_type': 'boolean', 'setting_default': 'false'},
 {'setting_id': 'cm_manager_order_migrated_v2', 'setting_type': 'boolean', 'setting_default': 'false'},
 #======+============= Trakt Cache
@@ -872,10 +902,10 @@ def default_settings():
 {'setting_id': 'rpdb_format', 'setting_type': 'string', 'setting_default': ''},
 #==================== Context Menu
 {'setting_id': 'context_menu.enabled', 'setting_type': 'string',
-'setting_default': 'extras,options,playback_options,browse_movie_set,browse_seasons,browse_episodes,recommended,related,more_like_this,similar,in_trakt_list,' \
+'setting_default': 'extras,options,playback_options,external_scraper_settings,browse_movie_set,browse_seasons,browse_episodes,recommended,related,more_like_this,similar,in_trakt_list,' \
 'mdblist_manager,simkl_manager,trakt_manager,tmdb_manager,personal_manager,favorites_manager,mark_watched,unmark_previous_episode,exit,refresh,reload'},
 {'setting_id': 'context_menu.order', 'setting_type': 'string',
-'setting_default': 'extras,options,playback_options,browse_movie_set,browse_seasons,browse_episodes,recommended,related,more_like_this,similar,in_trakt_list,' \
+'setting_default': 'extras,options,playback_options,external_scraper_settings,browse_movie_set,browse_seasons,browse_episodes,recommended,related,more_like_this,similar,in_trakt_list,' \
 'mdblist_manager,simkl_manager,trakt_manager,tmdb_manager,personal_manager,favorites_manager,mark_watched,unmark_previous_episode,exit,refresh,reload'},
 
 
@@ -933,6 +963,17 @@ def default_settings():
 #==================== External
 {'setting_id': 'provider.external', 'setting_type': 'boolean', 'setting_default': 'false'},
 {'setting_id': 'external_scraper.name', 'setting_type': 'string', 'setting_default': 'empty_setting'},
+{'setting_id': 'external_scraper.slot1.module', 'setting_type': 'string', 'setting_default': 'empty_setting'},
+{'setting_id': 'external_scraper.slot1.name', 'setting_type': 'string', 'setting_default': 'empty_setting'},
+{'setting_id': 'external_scraper.slot1.enabled', 'setting_type': 'boolean', 'setting_default': 'false'},
+{'setting_id': 'external_scraper.slot2.module', 'setting_type': 'string', 'setting_default': 'empty_setting'},
+{'setting_id': 'external_scraper.slot2.name', 'setting_type': 'string', 'setting_default': 'empty_setting'},
+{'setting_id': 'external_scraper.slot2.enabled', 'setting_type': 'boolean', 'setting_default': 'false'},
+{'setting_id': 'external_scraper.slot3.module', 'setting_type': 'string', 'setting_default': 'empty_setting'},
+{'setting_id': 'external_scraper.slot3.name', 'setting_type': 'string', 'setting_default': 'empty_setting'},
+{'setting_id': 'external_scraper.slot3.enabled', 'setting_type': 'boolean', 'setting_default': 'false'},
+{'setting_id': 'external_scraper.run_mode', 'setting_type': 'action', 'setting_default': '1', 'settings_options': {'0': 'Parallel (All Enabled Slots)', '1': 'Series (Fallback by Slot Order)'}},
+{'setting_id': 'migration.external_scraper_slots_v160', 'setting_type': 'boolean', 'setting_default': 'false'},
 {'setting_id': 'migration.cache_check_pm_oc_tb_v129e', 'setting_type': 'boolean', 'setting_default': 'false'},
 {'setting_id': 'migration.my_content_nav_mode_v136', 'setting_type': 'boolean', 'setting_default': 'false'},
 #==================== Real Debrid

@@ -525,7 +525,7 @@ class Subtitles(xbmc.Player):
 		return response.json().get('subtitles', []) if response.ok else response.reason
 
 	def _video_file_subs(self):
-		return enable_local_subtitles(self, poster=self.poster, notify=False)
+		return enable_local_subtitles(self, poster=self.poster)
 
 	def _downloaded_subs(self):
 		files = ku.list_dirs(self.subtitle_path)[1]
@@ -536,7 +536,7 @@ class Subtitles(xbmc.Player):
 			with ku.open_file(subtitle) as file: content = file.read()
 			if not _looks_like_subtitle_content(content): return False
 		except: return False
-		#ku.notification('Downloaded subtitles found', icon=self.poster, settle_ms=150)
+		ku.notification('Downloaded subtitles found', icon=self.poster, settle_ms=150)
 		return subtitle
 
 	def _searched_subs(self):
@@ -544,10 +544,10 @@ class Subtitles(xbmc.Player):
 		if isinstance(subs, str):
 			return ku.notification('SubMaker error: %s' % subs, settle_ms=150)
 		if not subs:
-			return #ku.notification('No subtitles found', icon=self.poster, settle_ms=150)
+			return ku.notification('No subtitles found', icon=self.poster, settle_ms=150)
 		content = _download_submaker_content(self.subtitles_download, subs, self.language)
 		if not content:
-			return #ku.notification('No subtitles found', icon=self.poster, settle_ms=150)
+			return ku.notification('No subtitles found', icon=self.poster, settle_ms=150)
 		final_path = '%s%s' % (self.subtitle_path, self.search_filename)
 		with ku.open_file(final_path, 'w') as file: file.write(content)
 		ku.sleep(1000)
@@ -578,7 +578,7 @@ class Subtitles(xbmc.Player):
 
 class OpenSubtitlesSubs(xbmc.Player):
 	def _video_file_subs(self):
-		return enable_local_subtitles(self, poster=self.poster, notify=False)
+		return enable_local_subtitles(self, poster=self.poster)
 
 	def run(self, imdb_id, season, episode, poster, year=None, playing_filename=None):
 		self.poster = poster
@@ -592,7 +592,7 @@ class OpenSubtitlesSubs(xbmc.Player):
 			path = fetch_alert_subtitle(imdb_id, season, episode, year, playing_filename)
 		except: path = None
 		if not path:
-			return #ku.notification('No subtitles found', icon=poster, settle_ms=150)
+			return ku.notification('No subtitles found', icon=poster, settle_ms=150)
 		remember_active_subtitle_path(path)
-		#ku.notification('Downloaded subtitles found', icon=poster, settle_ms=150)
+		ku.notification('Downloaded subtitles found', icon=poster, settle_ms=150)
 		return self.setSubtitles(path)
