@@ -137,7 +137,7 @@ def update_plugin_references(root_path, search_str, replace_str):
 root_path = r'C:\TEMP\New folder (2)'
 
 clean_python_artifacts(root_path)
-exit()
+#exit()
 
 search_str = "plugin.video.redlight"
 #replace_str = "plugin.video.redlight_mod"
