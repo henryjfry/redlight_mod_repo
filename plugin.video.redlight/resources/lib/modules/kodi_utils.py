@@ -52,6 +52,7 @@ def extras_items():
 def context_menu_items():
 	return [
 	{'name': 'Extras', 'value': 'extras'}, {'name': 'Options', 'value': 'options'}, {'name': 'Play Options', 'value': 'playback_options'},
+	{'name': 'External Scraper Settings', 'value': 'external_scraper_settings'},
 	{'name': 'Browse Movie Set', 'value': 'browse_movie_set'}, {'name': 'Browse TV Seasons', 'value': 'browse_seasons'},
 	{'name': 'Browse Season Episodes', 'value': 'browse_episodes'}, {'name': 'Browse Recommended', 'value': 'recommended'}, {'name': 'Browse Related', 'value': 'related'},
 	{'name': 'Browse More Like This', 'value': 'more_like_this'}, {'name': 'Browse Similar', 'value': 'similar'}, {'name': 'In Trakt Lists', 'value': 'in_trakt_list'},
@@ -245,10 +246,14 @@ def build_url(url_params):
 _FOLDER_URL_SKIP = frozenset(('iconImage', 'random_support', 'random', 'name', 'isFolder'))
 _FOLDER_URL_KEEP_NAME_MODES = frozenset(('navigator.build_shortcut_folder_contents',))
 
+def _folder_url_keep_name(mode):
+	if mode in _FOLDER_URL_KEEP_NAME_MODES: return True
+	return mode.startswith('random.build_')
+
 def build_folder_url(url_params):
 	mode = url_params.get('mode', '')
 	skip = _FOLDER_URL_SKIP
-	if mode in _FOLDER_URL_KEEP_NAME_MODES:
+	if _folder_url_keep_name(mode):
 		skip = skip - frozenset(('name',))
 	routing = {k: v for k, v in url_params.items() if k not in skip and v not in (None, '')}
 	if 'category_name' not in routing and url_params.get('name') and mode in ('build_movie_list', 'build_tvshow_list'):
@@ -833,9 +838,37 @@ def open_settings():
 	from windows.base_window import open_window
 	open_window(('windows.settings_manager', 'SettingsManager'), 'settings_manager.xml')
 
-def external_scraper_settings():
+def external_scraper_settings(params=None):
 	try:
-		external = get_property('redlight.external_scraper.module')
+		import json
+		from modules import settings
+		params = params or {}
+		slot = None
+		if params.get('slot') not in (None, ''):
+			try: slot = int(params.get('slot'))
+			except: slot = None
+		slots = settings.configured_external_scraper_slots()
+		if not slots:
+			external = get_property('redlight.external_scraper.module')
+			if external in ('empty_setting', ''): return
+			execute_builtin('Addon.OpenSettings(%s)' % external)
+			return
+		if slot is None:
+			if len(slots) == 1:
+				slot = slots[0]['slot']
+			else:
+				list_items = []
+				for entry in slots:
+					line2 = 'Slot %d' % entry['slot']
+					if not entry['enabled']: line2 = '%s (disabled)' % line2
+					list_items.append({'line1': entry['display_name'], 'line2': line2})
+				kwargs = {'items': json.dumps(list_items), 'heading': 'External Scraper Settings', 'multi_line': 'true'}
+				choice = select_dialog(slots, **kwargs)
+				if choice is None: return
+				execute_builtin('Addon.OpenSettings(%s)' % choice['module_id'])
+				return
+		data = settings.external_scraper_slot_data(slot)
+		external = data['module']
 		if external in ('empty_setting', ''): return
 		execute_builtin('Addon.OpenSettings(%s)' % external)
 	except: pass

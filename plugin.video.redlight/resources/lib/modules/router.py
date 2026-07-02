@@ -47,20 +47,9 @@ def routing(sys):
 	elif 'easynews.' in mode:
 		from indexers import easynews
 		return exec('easynews.%s(params)' % mode.split('.')[1])
-	elif 'playback.' in mode:   ## PATCH
-#		from modules.kodi_utils import player_check   ## PATCH
-#		return player_check(mode, params)   ## PATCH
-		if mode == 'playback.media':
-			from modules.sources import Sources
-			from modules.sources import PROP_SOURCES_BUSY
-			import xbmc, xbmcgui
-			xbmcgui.Window(10000).clearProperty(PROP_SOURCES_BUSY)
-			xbmcgui.Window(10000).clearProperty('fenlight.onPlayBackStarted')
-			playlist = xbmc.PlayList(xbmc.PLAYLIST_VIDEO)
-			playlist.clear()
-			params['prescrape'] = 'true'
-			
-			return Sources().playback_prep(params)  ## PATCH
+	elif 'playback.' in mode:
+		from modules.kodi_utils import player_check
+		return player_check(mode, params)
 	elif 'choice' in mode:
 		from indexers import dialogs
 		return exec('dialogs.%s(params)' % mode)
@@ -376,6 +365,9 @@ def routing(sys):
 	elif mode == 'hide_unhide_progress_items':
 		from modules.watched_status import hide_unhide_progress_items
 		return hide_unhide_progress_items(params)
+	elif mode in ('external_scraper_clear_slot', 'external_scraper_move_slot'):
+		from indexers import dialogs
+		return exec('dialogs.%s(params)' % mode)
 	elif mode == 'open_external_scraper_settings':
 		from modules.kodi_utils import external_scraper_settings
-		return external_scraper_settings()
+		return external_scraper_settings(params)

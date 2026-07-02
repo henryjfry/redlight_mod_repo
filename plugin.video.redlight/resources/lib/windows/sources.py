@@ -3,7 +3,7 @@ import json
 from windows.base_window import BaseDialog
 from caches.settings_cache import get_setting, set_setting
 from modules.debrid import debrid_cache_check_available
-from modules.settings import debrid_cache_check
+from modules.settings import debrid_cache_check, external_module_display_name
 from modules.utils import TaskPool
 from modules.source_utils import source_filters
 from modules.settings import provider_sort_ranks, avoid_episode_spoilers, max_threads
@@ -240,9 +240,15 @@ class SourcesResults(BaseDialog):
 					item_highlight = self.info_highlights_dict[key]
 					set_properties({'source_type': 'DIRECT', 'provider': provider.upper()})
 				highlight_bg = _highlight_with_alpha(item_highlight, self.highlight_alpha) if self.tint_focused_background else 'FFCCCCCC'
+				scraper_module = ''
+				scraper_suffix = ''
+				if scrape_provider == 'external':
+					scraper_module = external_module_display_name(get('external_module', ''))
+					if scraper_module:
+						scraper_suffix = '     [COLOR %s][B]Scraper: [/B][/COLOR]%s' % (item_highlight, scraper_module.upper())
 				set_properties({'name': name.upper(), 'source_site': source_site, 'provider_icon': provider_icon, 'quality_icon': quality_icon, 'count': '%02d.' % count,
 						'size_label': get('size_label', 'N/A'), 'extraInfo': extraInfo, 'quality': quality.upper(), 'hash': get('hash', 'N/A'), 'source': json.dumps(item),
-						'highlight': item_highlight, 'highlight_bg': highlight_bg})
+						'highlight': item_highlight, 'highlight_bg': highlight_bg, 'scraper_module': scraper_module.upper() if scraper_module else '', 'scraper_suffix': scraper_suffix})
 				item_list.append((listitem, count))
 			except: pass
 		try:
@@ -374,6 +380,8 @@ class SourcesResults(BaseDialog):
 		self.setProperty('filter_applied', 'false')
 		self.setProperty('filter_info', '')
 
+_RESUME_CHOICE_TIMEOUT_MS = 15000
+
 class SourcesPlayback(BaseDialog):
 	def __init__(self, *args, **kwargs):
 		BaseDialog.__init__(self, *args)
@@ -463,6 +471,7 @@ class SourcesPlayback(BaseDialog):
 	def set_resume_properties(self, percent):
 		self.setProperty('window_mode', self.window_mode)
 		self.setProperty('resume_percent', percent)
+		self.setProperty('percent', '0')
 		self.setFocusId(10)
 		self.update_resumer()
 
@@ -483,8 +492,9 @@ class SourcesPlayback(BaseDialog):
 	def update_resumer(self):
 		count = 0
 		while self.resume_choice is None:
-			percent = int((float(count)/10000)*100)
-			if percent >= 100: self.resume_choice = 'resume'
+			percent = int((float(count) / _RESUME_CHOICE_TIMEOUT_MS) * 100)
+			if percent >= 100:
+				self.resume_choice = 'resume'
 			self.setProperty('percent', str(percent))
 			count += 100
 			self.sleep(100)
@@ -506,6 +516,7 @@ class SourcesInfo(BaseDialog):
 		self.setProperty('name', self.item_get_property('name'))
 		self.setProperty('source_type', self.item_get_property('source_type'))
 		self.setProperty('source_site', self.item_get_property('source_site'))
+		self.setProperty('scraper_module', self.item_get_property('scraper_module'))
 		self.setProperty('size_label', self.item_get_property('size_label'))
 		self.setProperty('extraInfo', self.item_get_property('extraInfo'))
 		self.setProperty('highlight', self.item_get_property('highlight'))
